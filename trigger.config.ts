@@ -1,13 +1,10 @@
 import { defineConfig } from "@trigger.dev/sdk";
-import { syncEnvVars } from "@trigger.dev/build/extensions/core";
-import * as dotenv from "dotenv";
-import * as fs from "fs";
-import * as path from "path";
 
 export default defineConfig({
-  // TODO: replace with the actual Trigger.dev project ref once Omar confirms
-  // (new project for positive-replies-wall vs reusing the existing Omnivate project).
-  project: "proj_REPLACE_ME",
+  // Reusing the existing Omnivate production Trigger.dev project (same ref as
+  // outbound/trigger.config.ts) — our 2 tasks (ingest-smartlead-replies,
+  // classify-replies) live alongside the 112 outbound tasks.
+  project: "proj_vdhufffmwghsuhddbqrd",
   runtime: "node",
   logLevel: "info",
   // Mirror the outbound repo's post-OrbitalX-retro default (4h cap).
@@ -25,14 +22,12 @@ export default defineConfig({
     },
   },
   dirs: ["./trigger"],
-  build: {
-    extensions: [
-      syncEnvVars(async () => {
-        const envPath = path.resolve(process.cwd(), ".env");
-        if (!fs.existsSync(envPath)) return [];
-        const envConfig = dotenv.parse(fs.readFileSync(envPath));
-        return Object.entries(envConfig).map(([name, value]) => ({ name, value }));
-      }),
-    ],
-  },
+  // Note: deliberately NOT using the syncEnvVars build extension that
+  // outbound/trigger.config.ts uses. The Trigger.dev project is shared with
+  // outbound's 112 tasks, and that extension would clobber outbound's env vars
+  // with whatever's in our local .env on every deploy. Our tasks rely on env
+  // vars that already exist at the project level (set there by outbound's
+  // deploys). If a deployed task fails with "X is not set", add the var via
+  // the Trigger.dev dashboard or `npx trigger.dev@latest envvars create` —
+  // don't re-enable the bulk sync.
 });
