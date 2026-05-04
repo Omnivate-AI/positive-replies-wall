@@ -1,0 +1,39 @@
+{
+  "name": "positive-replies-wall",
+  "version": "0.1.0",
+  "description": "Public landing page wall of Omnivate's best positive cold-outbound replies, ingested from Smartlead and classified by AI.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "trigger:dev": "npx trigger.dev@latest dev",
+    "trigger:deploy": "npx trigger.dev@latest deploy",
+    "db:migrate": "npx supabase db push --include-all",
+    "db:diff": "npx supabase db diff",
+    "ingest:local": "npx tsx scripts/ingest-local.ts",
+    "classify:local": "npx tsx scripts/classify-local.ts",
+    "calibration:m4": "npx tsx scripts/run-calibration.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "vitest run tests/e2e",
+    "test:smoke": "vitest run tests/smoke"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.95.2",
+    "@trigger.dev/sdk": "^4.3.3",
+    "@types/ws": "^8.18.1",
+    "ws": "^8.20.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@trigger.dev/build": "^4.3.3",
+    "@types/node": "^25.2.1",
+    "dotenv": "^17.2.4",
+    "supabase": "^2.20.5",
+    "tsx": "^4.20.4",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.5"
+  }
+}
