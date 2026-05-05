@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { listClients, uniboxUrl } from "../../trigger/lib/smartlead.js";
+import { isSdrSideMessage, listClients, uniboxUrl } from "../../trigger/lib/smartlead.js";
 import { mockResponse } from "../_helpers/fixtures.js";
 
 describe("uniboxUrl()", () => {
@@ -7,6 +7,48 @@ describe("uniboxUrl()", () => {
     expect(uniboxUrl(2603762462)).toBe(
       "https://app.smartlead.ai/app/master-inbox?leadMap=2603762462",
     );
+  });
+});
+
+describe("isSdrSideMessage()", () => {
+  it("flags Andrew + Christie (Roosterpunk SDRs)", () => {
+    expect(isSdrSideMessage("andrew.last@roosterpunk.com")).toBe(true);
+    expect(isSdrSideMessage("Andrew.Last@roosterpunk.com")).toBe(true); // case-insensitive
+    expect(isSdrSideMessage("christie.johansen-pinney@roosterpunk.com")).toBe(true);
+  });
+
+  it("flags Roosterpunk subdomain variants (emailroosterpunk, powerroosterpunk)", () => {
+    expect(isSdrSideMessage("andrew@emailroosterpunk.com")).toBe(true);
+    expect(isSdrSideMessage("andrew@powerroosterpunk.com")).toBe(true);
+  });
+
+  it("flags Gladlane SDRs", () => {
+    expect(isSdrSideMessage("mehdi@gladlane.com")).toBe(true);
+    expect(isSdrSideMessage("chuka@gladlane.com")).toBe(true);
+  });
+
+  it("flags OrbitalX SDRs (orbitalxbrands.com + orbitalx.com)", () => {
+    expect(isSdrSideMessage("james.ford@orbitalxbrands.com")).toBe(true);
+    expect(isSdrSideMessage("josh@orbitalx.com")).toBe(true);
+  });
+
+  it("flags Omnivate own outbound (getomnivate.com)", () => {
+    expect(isSdrSideMessage("omar.almubarak@getomnivate.com")).toBe(true);
+  });
+
+  it("does NOT flag prospect domains", () => {
+    expect(isSdrSideMessage("ilan.bass@flawlessai.com")).toBe(false);
+    expect(isSdrSideMessage("vbalaro@star.global")).toBe(false);
+    expect(isSdrSideMessage("alex.kemp@shiphawk.com")).toBe(false);
+    expect(isSdrSideMessage("greg@nestogroup.ca")).toBe(false);
+    expect(isSdrSideMessage("melanigriffith@google.com")).toBe(false);
+  });
+
+  it("returns false for null / empty / malformed inputs", () => {
+    expect(isSdrSideMessage(null)).toBe(false);
+    expect(isSdrSideMessage(undefined)).toBe(false);
+    expect(isSdrSideMessage("")).toBe(false);
+    expect(isSdrSideMessage("not-an-email")).toBe(false);
   });
 });
 

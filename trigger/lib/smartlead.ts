@@ -185,3 +185,36 @@ export async function getLeadMessageHistory(
 export function uniboxUrl(campaignLeadMapId: number): string {
   return `https://app.smartlead.ai/app/master-inbox?leadMap=${campaignLeadMapId}`;
 }
+
+/**
+ * Sometimes Smartlead's message-history endpoint returns SDR-side outbound
+ * messages tagged as `type=REPLY` — typically when an SDR replies inside the
+ * inbox to keep the thread moving (e.g. "Thanks Justine. A strong set here..."
+ * from Andrew). Those aren't prospect replies — they're our own outbound — and
+ * they pollute prw_replies if we keep them.
+ *
+ * Filter is by from-address domain: any address whose domain matches an
+ * Omnivate-side outbound domain is SDR-side and skipped at ingest. Domains are
+ * derived from the production CLIENT_MAP in outbound/trigger/lib/smartlead.ts
+ * plus observed contamination in the v1.0 backfill.
+ */
+const SDR_DOMAIN_SUBSTRINGS = [
+  "roosterpunk.com",
+  "orbitalxbrands.com",
+  "orbitalx.com",
+  "getomnivate.com",
+  "gladlane.com",
+  "inboxpantheon.com",
+  "valdaenergy.com",
+  "paycaptain.com",
+  "cylindo.com",
+];
+
+export function isSdrSideMessage(fromEmail: string | null | undefined): boolean {
+  if (!fromEmail) return false;
+  const lower = fromEmail.toLowerCase();
+  const at = lower.indexOf("@");
+  if (at < 0) return false;
+  const domain = lower.slice(at + 1);
+  return SDR_DOMAIN_SUBSTRINGS.some((sub) => domain.includes(sub));
+}

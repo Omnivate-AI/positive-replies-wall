@@ -17,8 +17,17 @@ import { chatJson, type ChatMessage } from "./openrouter.js";
 /**
  * Bump this when the prompt content changes. Bumping triggers a re-classification
  * of every reply on the next batch run because of UNIQUE(reply_id, prompt_version).
+ *
+ * v1.2: stricter on offer-vs-outreach distinction. Replies that praise the
+ * offer/work ("it sounds interesting what you do") without naming a concrete
+ * element of the email itself = NOT publish-worthy, even if they convert.
+ * Added Kristian + Simon style replies as REJECTION examples.
+ *
+ * v1.1: prompt returns `cleaned_reply_text` (quoted thread / mobile signatures
+ * stripped, UTF-8 mojibake normalized). Quiz + wall render this saved cleaned
+ * text so the human reads exactly what the AI scored.
  */
-export const PROMPT_VERSION = "v1.0";
+export const PROMPT_VERSION = "v1.2";
 
 /** M4 categories, mirrored as a Zod enum so the model's output is validated. */
 export const CATEGORY_ENUM = [
@@ -37,6 +46,12 @@ export const SDR_FIRST_NAMES = ["Christie", "Andrew", "James", "Josh", "Omar"];
 export const HIGH_QUALITY_THRESHOLD = 55;
 
 export const ClassifyResultSchema = z.object({
+  /** AI-extracted prospect reply with quoted thread / forwarded blocks /
+   * mobile signatures removed and UTF-8 mojibake normalized. Required from
+   * v1.1 onward. Empty string is valid and means "no original reply text"
+   * (the entire body was quoted thread / forwarded). The display layer falls
+   * back to the raw body in that case. */
+  cleaned_reply_text: z.string().max(20000),
   praise_score: z.number().int().min(0).max(30),
   specificity_score: z.number().int().min(0).max(25),
   authenticity_score: z.number().int().min(0).max(25),
@@ -68,27 +83,88 @@ function getSystemPrompt(): string {
 }
 
 /**
- * Strip basic HTML so the model sees readable text. Smartlead reply bodies
- * are HTML; the model can sort of read HTML but cleaning helps both quality
- * and token count.
+ * Reverse common UTF-8-misread-as-Windows-1252 mojibake patterns. Smartlead
+ * occasionally serves reply bodies whose bytes have been double-encoded at
+ * some point in the mail-routing chain — `—` em dash becomes `â€"`,
+ * non-breaking space becomes `Â`, smart quotes become `â€™` / `â€œ`, etc.
+ *
+ * Patterns ordered longest-first so multi-char sequences win before any
+ * shorter overlapping pattern (e.g. `â€™` resolves before `â€`).
  */
-export function stripHtml(html: string): string {
-  return html
-    .replace(/<\s*br\s*\/?\s*>/gi, "\n")
-    .replace(/<\/(p|div|li|h[1-6])\s*>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+export function normalizeEncoding(text: string): string {
+  return (
+    text
+      // smart quotes
+      .replace(/â€™/g, "'")
+      .replace(/â€˜/g, "'")
+      .replace(/â€œ/g, '"')
+      .replace(/â€/g, '"')
+      // dashes + ellipsis
+      .replace(/â€/g, "—") // em dash
+      .replace(/â€/g, "–") // en dash
+      .replace(/â€¦/g, "…")
+      // catch-all for any remaining "â€<x>" pattern → assume em dash
+      .replace(/â€./g, "—")
+      // double-encoded NBSP — most often spurious next to spaces/periods
+      .replace(/Â /g, " ")
+      .replace(/(?<=\w)Â/g, "") // stray Â glued to end of a word
+      .replace(/(?<=[!?.,;:)\]'"])Â/g, "") // Â immediately after punctuation
+      .replace(/^Â+/gm, "") // stray Â at line start
+      .replace(/Â+$/gm, "") // stray Â at line end
+      // accented Latin (UTF-8 bytes for é/è/etc. read as 1252)
+      .replace(/Ã©/g, "é")
+      .replace(/Ã¨/g, "è")
+      .replace(/Ã /g, "à") // Ã + NBSP (real mojibake form: UTF-8 byte A0 = NBSP in CP1252)
+      .replace(/Ã¢/g, "â")
+      .replace(/Ã¡/g, "á")
+      .replace(/Ã­/g, "í")
+      .replace(/Ã³/g, "ó")
+      .replace(/Ãº/g, "ú")
+      .replace(/Ã±/g, "ñ")
+      .replace(/Ã®/g, "î")
+      .replace(/Ã´/g, "ô")
+      .replace(/Ã»/g, "û")
+      .replace(/Ã«/g, "ë")
+      .replace(/Ã¯/g, "ï")
+      .replace(/Ã¶/g, "ö")
+      .replace(/Ã¼/g, "ü")
+  );
 }
 
+/**
+ * Strip basic HTML so the model sees readable text. Smartlead reply bodies
+ * are HTML; the model can sort of read HTML but cleaning helps both quality
+ * and token count. Also runs `normalizeEncoding()` to undo common mojibake
+ * before any downstream consumer sees the text.
+ */
+export function stripHtml(html: string): string {
+  return normalizeEncoding(
+    html
+      .replace(/<\s*br\s*\/?\s*>/gi, "\n")
+      .replace(/<\/(p|div|li|h[1-6])\s*>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
+  );
+}
+
+/** Cap input body before sending to the model. A handful of "replies" are
+ * actually huge non-delivery reports / out-of-office walls / forwarded threads
+ * that blow past the model's context budget. We only need the first few KB to
+ * decide praise + extract any prospect-typed text. */
+const MAX_BODY_CHARS = 6000;
+
 function buildUserMessage(input: ClassifyInput): string {
-  const cleanBody = stripHtml(input.reply_body);
+  let cleanBody = stripHtml(input.reply_body);
+  if (cleanBody.length > MAX_BODY_CHARS) {
+    cleanBody = cleanBody.slice(0, MAX_BODY_CHARS) + "\n[...body truncated for length...]";
+  }
   return [
     `INPUT:`,
     `  reply_subject: ${input.reply_subject ? JSON.stringify(input.reply_subject) : "null"}`,
@@ -104,17 +180,24 @@ function buildUserMessage(input: ClassifyInput): string {
 }
 
 /**
- * Defensive recompute: never trust the model's `is_high_quality` flag — derive
- * it from the sub-scores on our side. Catches the "praise_score=10 but flag=true"
- * inconsistency the prompt's BAD EXAMPLES warns the model about.
+ * Defensive post-processing on the model's output:
+ *   1. Recompute `is_high_quality` from sub-scores — never trust the model's flag.
+ *      Catches the "praise_score=10 but flag=true" inconsistency the prompt's
+ *      BAD EXAMPLES warns the model about.
+ *   2. Run `normalizeEncoding()` over `cleaned_reply_text` — defense-in-depth in
+ *      case the model missed any mojibake clusters in its cleaning.
  */
-function reconcileHighQuality(parsed: ClassifyResult): ClassifyResult {
+function postProcess(parsed: ClassifyResult): ClassifyResult {
   const total =
     parsed.praise_score +
     parsed.specificity_score +
     parsed.authenticity_score +
     parsed.standalone_score;
-  return { ...parsed, is_high_quality: total >= HIGH_QUALITY_THRESHOLD };
+  return {
+    ...parsed,
+    cleaned_reply_text: normalizeEncoding(parsed.cleaned_reply_text).trim(),
+    is_high_quality: total >= HIGH_QUALITY_THRESHOLD,
+  };
 }
 
 /**
@@ -127,7 +210,10 @@ export async function classifyReply(input: ClassifyInput): Promise<ClassifyResul
     { role: "system", content: getSystemPrompt() },
     { role: "user", content: buildUserMessage(input) },
   ];
-  const raw = await chatJson<unknown>(messages, { temperature: 0.1, maxTokens: 600 });
+  // 2500 max_tokens accommodates cleaned_reply_text for long replies + the
+  // four sub-scores + reasoning + categories. Body itself is pre-capped at
+  // MAX_BODY_CHARS so cleaned_reply_text can never exceed it.
+  const raw = await chatJson<unknown>(messages, { temperature: 0.1, maxTokens: 2500 });
   const parsed = ClassifyResultSchema.parse(raw);
-  return reconcileHighQuality(parsed);
+  return postProcess(parsed);
 }

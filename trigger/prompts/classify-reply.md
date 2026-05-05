@@ -1,13 +1,27 @@
-# Classify reply — v1.0
+# Classify reply — v1.2
 
 > The prompt the M6 classifier sends to OpenRouter (`xiaomi/mimo-v2-flash`).
 > Externalised here so Omar can iterate on the prompt without touching code.
-> Bump `PROMPT_VERSION` (in `trigger/lib/classify.ts`) to "v1.1" etc. when
-> editing — that triggers re-classification on the next run.
+> Bump `PROMPT_VERSION` (in `trigger/lib/classify.ts`) when editing — that
+> triggers re-classification on the next run.
+>
+> **v1.2 changes:** stricter on the offer-vs-outreach distinction. "It sounds
+> interesting", "your work looks great", "thanks for reaching out" *without*
+> a concrete reference to copy / personalization / angle = NOT publish-worthy
+> even if the reply converts to a meeting. Added Kristian-style replies as
+> REJECTION examples so the model stops being charitable here.
+>
+> **v1.1 changes:** the model returns `cleaned_reply_text` — the prospect's
+> actual new reply with quoted thread / forwarded block / mobile signatures
+> stripped, and UTF-8 mojibake (â€™, Â, etc.) normalized.
 
 ---
 
-You score a reply that landed in our cold-outbound inbox. We are deciding whether to publish this reply on a public "wall of positive replies" page that proves to prospective clients our outbound actually works. Your job is to score the reply against a 4-component rubric (0–100 total) and decide whether it clears the publish bar.
+You do TWO jobs in one pass on a reply that landed in our cold-outbound inbox:
+(1) extract the prospect's actual new reply text (cleaning trail content and
+encoding artifacts), and (2) score it against a 4-component rubric (0–100
+total) to decide whether it's worth publishing on a public "wall of positive
+replies" page that proves to prospective clients our outbound actually works.
 
 # THE OBJECTIVE
 
@@ -22,7 +36,59 @@ What is **not** publish-worthy:
 - Out-of-office or auto-responder text
 - Vague positives that are too thin to be credible third-party social proof
 
-You read the reply and produce four sub-scores plus a true/false flag. The threshold is 55: the database treats anything ≥55 as publish-worthy, anything below as not.
+## The offer / outreach distinction (sharp)
+
+This is the single hardest call. Be conservative. *Praise on the offer* — what we sell, what we do, the value, the work, the report — does NOT qualify, even when the reply converts to a meeting and feels positive. *Praise on the outreach* — the email itself, its copy, the angle, the personalization, how researched it was, the writing — qualifies.
+
+Examples of OFFER praise (do NOT qualify):
+- "Sounds interesting" / "It sounds interesting what you do" → praising what we DO
+- "I'm interested in hearing more about your work / your tool / your approach" → product
+- "Thanks for the materials, looks helpful" → the materials, not the email
+- "I'd love to learn more" → curiosity about offer
+- "Appreciate you reaching out, can we schedule a call?" → polite + conversion, no comment on email itself
+- "Thank you for your mails, it sound interesting what you do" → the WORK is interesting; the email is just acknowledged
+
+Examples of OUTREACH praise (DO qualify):
+- "This is a great email" / "Best cold email I've received" → the email
+- "Loved how you tied this to my LinkedIn post" → the personalization
+- "Kudos on the targeted outreach" → the targeting
+- "I never reply to these but yours stood out" → the email vs. other emails
+- "Great email opener, got my attention" → the opener / copy
+
+If a reply has both — passing offer praise AND a genuine outreach compliment — the outreach compliment carries it. If a reply has only the conversion + offer praise without ANY mention of the email's quality, it's NOT publish-worthy regardless of how warm the tone is.
+
+## What we mean by "the prospect's actual reply"
+
+The `reply_body` you receive may include extra content the prospect's mail client
+appended automatically: the original outbound email quoted below ("On Mon, ..., 
+James Ford <james.ford@orbitalxbrands.com> wrote:"), a forwarded message block
+("---------- Forwarded message ----------"), an Outlook 3-line header ("From: ...
+Sent: ... To: ..."), or a mobile auto-signature ("Sent from my iPhone", "Get
+Outlook for iOS"). NONE of that is what the prospect typed *now* — it's the
+mail client decorating the message. Strip everything from the first such marker
+onward.
+
+Keep the prospect's own signature (the line or two they typed before sending,
+e.g. "Best, Sara" or "—Doreen"). That's part of their new reply.
+
+## What we mean by "encoding artifacts"
+
+Replies sometimes pass through mail-routing chains that mis-decode UTF-8 as
+Windows-1252 and re-encode it back. The result is mojibake — single characters
+that show up as 2–3 garbage characters. Normalize them in `cleaned_reply_text`:
+
+| Garbled | Should be | What it actually is |
+|---|---|---|
+| `â€™` | `'` | smart apostrophe |
+| `â€œ` / `â€` | `"` / `"` | smart quotes |
+| `â€"` (with U+201D) | `—` | em dash |
+| `â€"` (with U+201C) | `–` | en dash |
+| `â€¦` | `…` | ellipsis |
+| `Â ` | ` ` (space) | non-breaking space |
+| `Â` (stray, near a period or word) | drop entirely | residue |
+| `Ã©`, `Ã¨`, `Ã ` | `é`, `è`, `à` | accented Latin |
+
+You read the reply, produce the cleaned text, and then produce four sub-scores plus a true/false flag (scores apply to the *cleaned* text). The threshold is 55: the database treats anything ≥55 as publish-worthy, anything below as not.
 
 # INPUT
 
@@ -39,6 +105,7 @@ Return JSON only — no markdown fences, no prose before or after the JSON.
 
 ```
 {
+  "cleaned_reply_text": "the prospect's actual new reply, with quoted thread / forwarded blocks / mobile signatures removed and any encoding artifacts normalized",
   "praise_score": integer 0–30,
   "specificity_score": integer 0–25,
   "authenticity_score": integer 0–25,
@@ -50,6 +117,16 @@ Return JSON only — no markdown fences, no prose before or after the JSON.
 ```
 
 `is_high_quality` is true iff `praise_score + specificity_score + authenticity_score + standalone_score >= 55`. The DB will recompute the total from your sub-scores; you don't need to return it.
+
+`cleaned_reply_text` rules:
+- Verbatim from the input — only remove characters/blocks, never invent
+- Preserve the prospect's line breaks within the new reply
+- Keep the prospect's signature (e.g. "Best, Sara")
+- Strip everything from the first quoted-thread / forwarded-block / mobile-signature marker onward
+- Normalize encoding artifacts (see table above) to their proper characters
+- Trim trailing whitespace
+
+If the input has no trail and no encoding issues, `cleaned_reply_text` equals the input unchanged.
 
 # CATEGORY ENUM
 
@@ -102,6 +179,12 @@ Use only these strings in `categories` (lowercase, snake_case). One reply often 
 # GOOD EXAMPLES
 
 Each example shows a real reply (lightly trimmed) and the expected scoring. Reasoning is one or two sentences.
+
+> **Note about `cleaned_reply_text` for the examples below**: every input here is
+> already clean (no quoted thread, no forwarded block, no encoding artifacts).
+> For each one, your output's `cleaned_reply_text` should equal `reply_body`
+> verbatim — copy it through unchanged. The two examples *after* the rejection
+> set show how to strip a trail and fix mojibake.
 
 ---
 
@@ -354,6 +437,7 @@ INPUT:
   reply_from_email: "noreply.person@example.com"
 
 → {
+  "cleaned_reply_text": "Thanks for reaching out — we're not in the market for this right now.",
   "praise_score": 0,
   "specificity_score": 0,
   "authenticity_score": 20,
@@ -362,6 +446,84 @@ INPUT:
   "categories": [],
   "reasoning": "Polite no with no comment on the email."
 }
+
+---
+
+INPUT (the Kristian case — converts + offer-praise but no outreach praise):
+  reply_subject: "Re: your campaign"
+  reply_body: "Hi Andrew,\n\nSorry for not getting back last week - I am at a conference right now, so I will make it a bit short.\n\nThank you for your mails, it sound interesting what you do, and I have myself been thinking about mostly the last two bullets you list. I do not want to waste your time and I am guessing you are not doing this just for fun/learning, so what would the cost approximately be for this to be worth it for you and what outcomes would I/my business be able to expect for the amount you propose?\n\nThank you for a short feedback – happy to jump on a call early next week, if that is better?\n\nCheers,\nKristian"
+  reply_from_email: "kristian@example.com"
+
+→ {
+  "cleaned_reply_text": "Hi Andrew,\n\nSorry for not getting back last week - I am at a conference right now, so I will make it a bit short.\n\nThank you for your mails, it sound interesting what you do, and I have myself been thinking about mostly the last two bullets you list. I do not want to waste your time and I am guessing you are not doing this just for fun/learning, so what would the cost approximately be for this to be worth it for you and what outcomes would I/my business be able to expect for the amount you propose?\n\nThank you for a short feedback – happy to jump on a call early next week, if that is better?\n\nCheers,\nKristian",
+  "praise_score": 5,
+  "specificity_score": 5,
+  "authenticity_score": 22,
+  "standalone_score": 18,
+  "is_high_quality": false,
+  "categories": [],
+  "reasoning": "'It sound interesting what you do' praises the work/offer, not the outreach. The reply is engaged and converts to a call, but says nothing about the email's copy, angle, or personalization. Conversion alone — even with a friendly tone — doesn't qualify."
+}
+
+---
+
+INPUT (offer-praise + conversion, longer / senior — also NOT publish-worthy):
+  reply_subject: "Re: insight swap"
+  reply_body: "Hi Andrew\n\nThat sounds interesting and I'm up for an insight swap – appreciate you reaching out. I have a dual role here at Future... I have a feel for where Games is going but not the same confidence for Tech, so if you want to skew that way then I'd be particularly appreciative.\n\nLet's chat about how I can help you in return.\n\nBest wishes\nSimon"
+  reply_from_email: "simon@example.com"
+
+→ {
+  "cleaned_reply_text": "Hi Andrew\n\nThat sounds interesting and I'm up for an insight swap – appreciate you reaching out. I have a dual role here at Future... I have a feel for where Games is going but not the same confidence for Tech, so if you want to skew that way then I'd be particularly appreciative.\n\nLet's chat about how I can help you in return.\n\nBest wishes\nSimon",
+  "praise_score": 6,
+  "specificity_score": 5,
+  "authenticity_score": 22,
+  "standalone_score": 18,
+  "is_high_quality": false,
+  "categories": [],
+  "reasoning": "'Appreciate you reaching out' is mild outreach acknowledgement, not praise — the reply names nothing specific about the email. The 'sounds interesting' is on the swap/offer. Senior, real, converting — but no comment on the outreach quality."
+}
+
+# EXTRACTION EXAMPLES — `cleaned_reply_text` in action
+
+These show the cleaning behavior. The scoring is incidental; focus on what `cleaned_reply_text` keeps and what it drops.
+
+---
+
+INPUT (Gmail-style with quoted thread):
+  reply_subject: "Re: vr in eye care"
+  reply_body: "Hi James,\n\nReaching out on behalf of Heru as their marketing director. Mark forwarded me your outreach, and I'd like to learn more — feel free to send the video.\n\nCheers,\nJordan\n\nOn Mon, Jan 19, 2026 at 11:21 AM James Ford <james.ford@orbitalxbrands.com> wrote:\n> Hi Mark,\n> Your latest Eye.Talk... [original outbound email, 30 lines]"
+  reply_from_email: "jordan@grayhouse.consulting"
+
+→ {
+  "cleaned_reply_text": "Hi James,\n\nReaching out on behalf of Heru as their marketing director. Mark forwarded me your outreach, and I'd like to learn more — feel free to send the video.\n\nCheers,\nJordan",
+  "praise_score": 5,
+  "specificity_score": 5,
+  "authenticity_score": 22,
+  "standalone_score": 18,
+  "is_high_quality": false,
+  "categories": [],
+  "reasoning": "Forwarded by Mark to Jordan, who replied — but only engages with the offer, no comment on the outreach itself. The 'On <date> ... wrote:' marker plus the quoted original outbound below are stripped from cleaned_reply_text."
+}
+
+---
+
+INPUT (with mojibake artifacts and a "Sent from my iPhone" trail):
+  reply_subject: "Re: pulse survey"
+  reply_body: "Thanks Andrew â€\" I have completed the survey!Â\n\nScheduled us time for the 18th.Â I'll try to work on the Pulse survey today!Â\n\nSent from my iPhone"
+  reply_from_email: "person@example.com"
+
+→ {
+  "cleaned_reply_text": "Thanks Andrew — I have completed the survey!\n\nScheduled us time for the 18th. I'll try to work on the Pulse survey today!",
+  "praise_score": 0,
+  "specificity_score": 0,
+  "authenticity_score": 18,
+  "standalone_score": 18,
+  "is_high_quality": false,
+  "categories": [],
+  "reasoning": "Pure conversion — no comment on the outreach. cleaned_reply_text fixes the em-dash mojibake (â€\" → —) and the stray Â characters (Â before periods → drop, Â at end → drop), then strips 'Sent from my iPhone'."
+}
+
+---
 
 # BAD EXAMPLES — DO NOT DO THIS
 
@@ -378,3 +540,9 @@ bad: Quoting the prospect's name or company in `reasoning` ("Mark from Heru love
 bad: Scoring `authenticity_score: 25` for a generic free-mail address (gmail.com, yahoo.com, hotmail.com). Real B2B usually means a corporate domain.
 
 bad: Penalising a short reply for being short. "Good email, got my attention" from a real B2B sender is publish-worthy on this rubric — the brief_acknowledgment category exists for exactly this shape.
+
+bad: Inventing text in `cleaned_reply_text` that wasn't in the input. The cleaning step REMOVES (trail, mojibake garbage) — it never adds, paraphrases, or summarizes. If you can't quote it from the input verbatim (modulo encoding fixes), don't put it there.
+
+bad: Including the quoted thread in `cleaned_reply_text` ("Hi James, thanks!\n\nOn Mon Jan 19 ... wrote:\n> Hi Mark, your latest..."). Strip everything from the first quoted-thread / forwarded-block / mobile-signature marker onward.
+
+bad: Omitting `cleaned_reply_text` entirely from the output, or returning it as empty when the input has actual text. The field is required.

@@ -103,7 +103,15 @@ export async function chat(messages: ChatMessage[], opts: ChatOptions = {}): Pro
       baseDelayMs: 500,
       isRetryable: (e) => {
         if (e && typeof e === "object" && "__nonRetryable" in e) return false;
-        return isTransientFetchError(e) || /\b5\d{2}\b|\b429\b/.test(e instanceof Error ? e.message : "");
+        const msg = e instanceof Error ? e.message : "";
+        return (
+          isTransientFetchError(e) ||
+          // HTTP-status-shaped errors
+          /\b5\d{2}\b|\b429\b/.test(msg) ||
+          // OpenRouter sometimes returns HTTP 200 with `{error: {message: "Internal Server Error"}}`
+          // in the body — these are transient. Match common upstream-flake phrases.
+          /Internal Server Error|Service Unavailable|Bad Gateway|Gateway Timeout|empty assistant content|OpenRouter API error/i.test(msg)
+        );
       },
     },
   );

@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+/* Google Sans is loaded via <link> tags in app/layout.tsx — CSS @import after
+ * Tailwind's expanded output triggers a "must precede all rules" PostCSS error,
+ * and <link> is faster anyway (preconnect + parallel fetch). */
+
+/* Light-mode design tokens. Premium feel via tight neutral palette + a single
+ * accent (indigo). Generous radii, subtle shadows, smooth transitions baked in.
+ */
+@theme {
+  --color-bg: #ffffff;
+  --color-bg-subtle: #fafafa;
+  --color-surface: #ffffff;
+  --color-border: #e4e4e7; /* zinc-200 */
+  --color-border-strong: #d4d4d8; /* zinc-300 */
+  --color-fg: #18181b; /* zinc-900 */
+  --color-fg-muted: #71717a; /* zinc-500 */
+  --color-fg-subtle: #a1a1aa; /* zinc-400 */
+  --color-accent: #4f46e5; /* indigo-600 */
+  --color-accent-hover: #4338ca; /* indigo-700 */
+  --color-accent-soft: #eef2ff; /* indigo-50 */
+  --color-success: #16a34a; /* green-600 */
+  --color-success-soft: #dcfce7; /* green-100 */
+  --color-danger: #dc2626; /* red-600 */
+  --color-danger-soft: #fee2e2; /* red-100 */
+
+  --radius-card: 16px;
+  --radius-button: 10px;
+  --radius-pill: 9999px;
+
+  --shadow-card: 0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 3px -1px rgba(0, 0, 0, 0.04);
+  --shadow-card-hover: 0 4px 12px -2px rgba(0, 0, 0, 0.06), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --shadow-button: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+
+  --font-sans: "Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Google Sans Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
+}
+
+html, body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+}
+
+/* Disable forced dark mode — this is a light-only experience. */
+@media (prefers-color-scheme: dark) {
+  html, body {
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+}
+
+/* Redaction bar — solid black rectangle the same height as surrounding text,
+ * with subtle inner shadow to read as opaque "tape" not just a colored span.
+ * Width is governed by the text it replaces (which stays in the DOM but is
+ * visually invisible via color: transparent). */
+.redacted {
+  background: #000;
+  color: transparent;
+  border-radius: 2px;
+  padding: 0 0.15em;
+  user-select: none;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  transition: background 200ms ease, color 200ms ease;
+}
+
+.redacted::selection {
+  background: #000;
+  color: transparent;
+}
+
+/* Smooth fade for the entire reply card body when the redaction toggle flips */
+.redaction-transition {
+  transition: opacity 180ms ease;
+}
+
+/* Generic button base reset for any unstyled <button> elements (accessible focus). */
+button {
+  font-family: inherit;
+}
+
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

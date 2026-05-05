@@ -89,6 +89,7 @@ async function writeClassification(
           is_high_quality: result.is_high_quality,
           categories: result.categories,
           reasoning: result.reasoning,
+          cleaned_reply_text: result.cleaned_reply_text,
           prompt_version: PROMPT_VERSION,
         },
         { onConflict: "reply_id,prompt_version", ignoreDuplicates: true },

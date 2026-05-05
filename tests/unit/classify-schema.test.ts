@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   ClassifyResultSchema,
   stripHtml,
+  normalizeEncoding,
   HIGH_QUALITY_THRESHOLD,
   PROMPT_VERSION,
   CATEGORY_ENUM,
@@ -9,6 +10,7 @@ import {
 
 describe("ClassifyResultSchema (Zod)", () => {
   const validResult = {
+    cleaned_reply_text: "Thank you so much for this email!",
     praise_score: 30,
     specificity_score: 25,
     authenticity_score: 25,
@@ -65,6 +67,16 @@ describe("ClassifyResultSchema (Zod)", () => {
   it("rejects empty reasoning string", () => {
     expect(() => ClassifyResultSchema.parse({ ...validResult, reasoning: "" })).toThrow();
   });
+
+  it("requires cleaned_reply_text (v1.1+)", () => {
+    const { cleaned_reply_text, ...withoutCleaned } = validResult;
+    void cleaned_reply_text;
+    expect(() => ClassifyResultSchema.parse(withoutCleaned)).toThrow();
+  });
+
+  it("accepts empty cleaned_reply_text (signals 'no original reply text'; display falls back to raw body)", () => {
+    expect(() => ClassifyResultSchema.parse({ ...validResult, cleaned_reply_text: "" })).not.toThrow();
+  });
 });
 
 describe("CATEGORY_ENUM", () => {
@@ -86,8 +98,73 @@ describe("HIGH_QUALITY_THRESHOLD", () => {
 });
 
 describe("PROMPT_VERSION", () => {
-  it("starts at v1.0", () => {
-    expect(PROMPT_VERSION).toBe("v1.0");
+  it("is v1.2 (stricter offer/outreach distinction)", () => {
+    expect(PROMPT_VERSION).toBe("v1.2");
+  });
+});
+
+describe("normalizeEncoding()", () => {
+  // Mojibake-byte cheat sheet (Unicode escapes used so source files stay clean):
+  //   â = â    € = €    ” = "    “ = "
+  //   ’ = '   ‘ = '    … = …    Â = Â
+  //   ã = Ã   © = ©      = NBSP
+
+  it("fixes em-dash mojibake (â€” → —)", () => {
+    expect(normalizeEncoding("Thanks Andrew â€” I have completed!"))
+      .toBe("Thanks Andrew — I have completed!");
+  });
+
+  it("fixes smart-apostrophe mojibake (â€’ → ')", () => {
+    expect(normalizeEncoding("I donâ€™t usually respond"))
+      .toBe("I don't usually respond");
+  });
+
+  it("fixes ellipsis mojibake (â€¦ → …)", () => {
+    expect(normalizeEncoding("Wellâ€¦ that worked"))
+      .toBe("Well… that worked");
+  });
+
+  it("removes stray Â before periods", () => {
+    expect(normalizeEncoding("Scheduled for the 18th.Â Will work on it!Â"))
+      .toBe("Scheduled for the 18th. Will work on it!");
+  });
+
+  it("collapses 'Â ' (Â followed by space) to a regular space", () => {
+    expect(normalizeEncoding("HelloÂ there")).toBe("Hello there");
+  });
+
+  it("fixes accented Latin mojibake (Ã© -> é, Ã + space -> à)", () => {
+    // Build mojibake via fromCharCode so source-editor encoding tweaks
+    // don't mangle the test fixture:
+    //   0xC3 = Ã (LATIN CAPITAL LETTER A WITH TILDE)
+    //   0xA9 = ©
+    const A = String.fromCharCode(0xC3);
+    const C = String.fromCharCode(0xA9);
+    expect(normalizeEncoding("Caf" + A + C)).toBe("Café");
+    expect(normalizeEncoding(A + String.fromCharCode(0xA0) + " pluthora")).toBe("à pluthora");
+  });
+
+  it("passes through clean text unchanged", () => {
+    const clean = "Hi James,\n\nThank you for the email!\n\nBest,\nMauritz";
+    expect(normalizeEncoding(clean)).toBe(clean);
+  });
+
+  it("is idempotent (running twice = running once)", () => {
+    const garbled = "Thanks Andrew â€” I have completed!Â";
+    const once = normalizeEncoding(garbled);
+    const twice = normalizeEncoding(once);
+    expect(twice).toBe(once);
+  });
+});
+
+describe("stripHtml() integrates normalizeEncoding", () => {
+  it("strips HTML AND fixes mojibake in one pass", () => {
+    const input = "<p>Thanks Andrew â€” I have completed!</p><p>Best,Â Sara</p>";
+    const out = stripHtml(input);
+    expect(out).not.toContain("â€");
+    expect(out).not.toContain("Â");
+    expect(out).toContain("—"); // em dash
+    expect(out).toContain("Sara");
   });
 });
 

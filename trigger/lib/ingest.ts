@@ -22,6 +22,7 @@ import {
   listCampaignsByClient,
   iterInterestedLeads,
   getLeadMessageHistory,
+  isSdrSideMessage,
 } from "./smartlead.js";
 import { toReplyRow, type ReplyRow } from "./mappers.js";
 import { supabase } from "./supabase.js";
@@ -113,7 +114,9 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestStats> 
             continue;
           }
 
-          for (const m of messages.filter((x) => x.type === "REPLY")) {
+          for (const m of messages.filter(
+            (x) => x.type === "REPLY" && !isSdrSideMessage(x.from),
+          )) {
             stats.repliesSeen++;
             replyRows.push(toReplyRow(client, campaign, leadEntry, m));
           }
