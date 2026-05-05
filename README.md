@@ -2,7 +2,7 @@
 
 A public landing page that displays Omnivate's best positive cold-outbound replies — automatically captured from Smartlead, AI-classified for quality, and rendered as a wall of email reply cards with span-level redaction support.
 
-[Strategy brief](brief.md) · Live demo (M7): https://positive-repies-wall.vercel.app
+[Strategy brief](brief.md) · Live: https://positive-repies-wall.vercel.app · [Coming-soon preview](https://positive-repies-wall.vercel.app/coming-soon) · [POC viewer](https://positive-repies-wall.vercel.app/m7/pocs) · [Audit quiz](https://positive-repies-wall.vercel.app/m7/quiz)
 
 ---
 
@@ -156,12 +156,6 @@ npx trigger.dev@4.4.5 deploy
 - **Bumping `PROMPT_VERSION`** in `trigger/lib/classify.ts` triggers a full re-classification on the next batch run (UNIQUE constraint on `(reply_id, prompt_version)` means old scores stay queryable for diff analysis).
 - **No truncation on the wall** — replies render in full per M4 policy. Skeptic-concession replies only land with their preamble intact.
 - **Sort by reply timestamp**, not score. Quality is a binary publish gate; recency reads more honestly than ranking.
-
-## Useful internal links
-
-- Vercel project: https://vercel.com/emmanuel-2239s-projects/positive-repies-wall
-- Trigger.dev project: https://cloud.trigger.dev/projects/v3/proj_vdhufffmwghsuhddbqrd
-- Supabase project: https://supabase.com/dashboard/project/uivgowblojtyiobhgjlv
 
 ## Owner
 
