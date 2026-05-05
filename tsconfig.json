@@ -35,6 +35,8 @@
     "app/**/*.tsx",
     "components/**/*.ts",
     "components/**/*.tsx",
+    "lib/**/*.ts",
+    "lib/**/*.tsx",
     "trigger/**/*.ts",
     "scripts/**/*.ts",
     "tests/**/*.ts",
