@@ -1,11 +1,12 @@
 /**
- * Trigger.dev task: ingest Smartlead positive replies into Supabase.
+ * Trigger.dev task: ingest Smartlead positive replies into Supabase as
+ * thread + messages rows.
  *
- * Wraps the pure logic in `./lib/ingest.ts`. The same logic also runs locally via
- * `npm run ingest:local` (see scripts/ingest-local.ts) — that's the path we use
- * for the M5 smoke test before deploying.
+ * Wraps the pure logic in `./lib/ingest.ts`. The same logic runs locally via
+ * `npm run ingest:local` (see scripts/ingest-local.ts).
  *
- * Idempotent: re-runs only insert new replies (UNIQUE constraint on smartlead_message_id).
+ * Idempotent: re-runs only update snapshot fields and add new messages;
+ * admin-edited highlight_text on prw_threads is preserved.
  */
 
 import { logger, task } from "@trigger.dev/sdk";
@@ -23,13 +24,15 @@ export const ingestSmartleadReplies = task({
       onProgress: (msg) => logger.info(msg),
     });
     logger.info("Ingest finished", {
-      runId: stats.runId,
       clients: stats.clientsSeen,
       campaigns: stats.campaignsSeen,
       leads: stats.leadsSeen,
-      replies: stats.repliesSeen,
-      inserted: stats.repliesInserted,
-      skipped: stats.repliesSkippedExisting,
+      threadsInserted: stats.threadsInserted,
+      threadsUpdated: stats.threadsUpdated,
+      threadsSkippedNoInbound: stats.threadsSkippedNoInbound,
+      messagesInserted: stats.messagesInserted,
+      leadsMatched: stats.leadsMatched,
+      redactionsSeeded: stats.redactionsSeeded,
       errorCount: stats.errors.length,
     });
     return stats;

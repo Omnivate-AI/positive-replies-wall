@@ -191,7 +191,8 @@ export function uniboxUrl(campaignLeadMapId: number): string {
  * messages tagged as `type=REPLY` — typically when an SDR replies inside the
  * inbox to keep the thread moving (e.g. "Thanks Justine. A strong set here..."
  * from Andrew). Those aren't prospect replies — they're our own outbound — and
- * they pollute prw_replies if we keep them.
+ * they need to be classified as direction='outbound' (not 'inbound') so the
+ * "first inbound" qualifying-reply detection works correctly.
  *
  * Filter is by from-address domain: any address whose domain matches an
  * Omnivate-side outbound domain is SDR-side and skipped at ingest. Domains are
@@ -217,4 +218,23 @@ export function isSdrSideMessage(fromEmail: string | null | undefined): boolean 
   if (at < 0) return false;
   const domain = lower.slice(at + 1);
   return SDR_DOMAIN_SUBSTRINGS.some((sub) => domain.includes(sub));
+}
+
+/**
+ * Classify a Smartlead message as outbound (something WE sent on behalf of
+ * a client SDR) or inbound (the lead replied).
+ *
+ *   type=SENT                                → outbound (always)
+ *   type=REPLY + from is SDR-side domain     → outbound (SDR replying inside
+ *                                              the inbox to keep the thread
+ *                                              moving — Andrew's "Thanks
+ *                                              Justine..." pattern)
+ *   type=REPLY + from is NOT SDR-side        → inbound  (genuine prospect)
+ *
+ * v1 ingest used isSdrSideMessage() to DROP the SDR-side replies. The new
+ * thread model keeps them — they're part of the conversation we want to study.
+ */
+export function messageDirection(msg: SLMessage): "outbound" | "inbound" {
+  if (msg.type === "SENT") return "outbound";
+  return isSdrSideMessage(msg.from) ? "outbound" : "inbound";
 }

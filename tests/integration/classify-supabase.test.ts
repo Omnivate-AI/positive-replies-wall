@@ -1,28 +1,28 @@
 /**
- * Integration test: classification storage in Supabase.
- * Validates the M6-relevant DB constraints with sentinel rows.
+ * Integration test: classification storage in Supabase under v2.0 thread model.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { supabase } from "../../trigger/lib/supabase.js";
 import { PROMPT_VERSION } from "../../trigger/lib/classify.js";
 
-const SENTINEL_PREFIX = "test-vitest-classify-";
+const SENTINEL_CAMPAIGN_ID = 999_888_777;
 
-const baseReply = {
-  smartlead_lead_id: 999_888_777,
-  smartlead_campaign_id: 999_888_777,
+const baseThread = {
+  smartlead_campaign_id: SENTINEL_CAMPAIGN_ID,
   smartlead_client_id: 999_888_777,
-  reply_from_email: "test@example.test",
-  reply_body_html: "<p>vitest sentinel reply</p>",
-  reply_received_at: "2026-01-01T00:00:00.000Z",
+  smartlead_campaign_lead_map_id: 999_888_777,
+  lead_email: "test@example.test",
 };
+
+let cursor = 0;
+const nextLeadId = () => 999_888_000 + cursor++;
 
 async function cleanupSentinels() {
   await supabase()
-    .from("prw_replies")
+    .from("prw_threads")
     .delete()
-    .like("smartlead_message_id", `${SENTINEL_PREFIX}%`);
+    .eq("smartlead_campaign_id", SENTINEL_CAMPAIGN_ID);
 }
 
 beforeAll(async () => {
@@ -33,11 +33,11 @@ afterAll(async () => {
   await cleanupSentinels();
 });
 
-async function newSentinelReply(suffix: string): Promise<number> {
+async function newSentinelThread(): Promise<number> {
   const sb = supabase();
   const { data, error } = await sb
-    .from("prw_replies")
-    .insert({ ...baseReply, smartlead_message_id: `${SENTINEL_PREFIX}${suffix}` })
+    .from("prw_threads")
+    .insert({ ...baseThread, smartlead_lead_id: nextLeadId() })
     .select("id")
     .single();
   if (error) throw new Error(`setup: ${error.message}`);
@@ -45,13 +45,13 @@ async function newSentinelReply(suffix: string): Promise<number> {
 }
 
 describe("prw_classifications writes", () => {
-  it("inserts a valid classification row with all sub-scores", async () => {
-    const replyId = await newSentinelReply("insert");
+  it("inserts a valid classification row with all sub-scores plus v2.0 fields", async () => {
+    const threadId = await newSentinelThread();
     const sb = supabase();
     const { data, error } = await sb
       .from("prw_classifications")
       .insert({
-        reply_id: replyId,
+        thread_id: threadId,
         praise_score: 25,
         specificity_score: 20,
         authenticity_score: 22,
@@ -59,20 +59,24 @@ describe("prw_classifications writes", () => {
         is_high_quality: true,
         categories: ["superlative", "personalization"],
         reasoning: "vitest sentinel — valid classification",
+        suggested_highlight_text: "this is one of the best",
+        suggested_redactions: ["Heru"],
         prompt_version: "test-vitest-v0",
       })
-      .select("total_score, categories")
+      .select("total_score, categories, suggested_highlight_text, suggested_redactions")
       .single();
     expect(error).toBeNull();
-    expect(data?.total_score).toBe(85); // GENERATED column verified
+    expect(data?.total_score).toBe(85);
     expect(data?.categories).toEqual(["superlative", "personalization"]);
+    expect(data?.suggested_highlight_text).toBe("this is one of the best");
+    expect(data?.suggested_redactions).toEqual(["Heru"]);
   });
 
-  it("UNIQUE(reply_id, prompt_version) blocks duplicate at same version", async () => {
-    const replyId = await newSentinelReply("uniq-version");
+  it("UNIQUE(thread_id, prompt_version) blocks duplicate at same version", async () => {
+    const threadId = await newSentinelThread();
     const sb = supabase();
     const row = {
-      reply_id: replyId,
+      thread_id: threadId,
       praise_score: 0,
       specificity_score: 0,
       authenticity_score: 0,
@@ -83,14 +87,14 @@ describe("prw_classifications writes", () => {
     const { error: e1 } = await sb.from("prw_classifications").insert(row);
     expect(e1).toBeNull();
     const { error: e2 } = await sb.from("prw_classifications").insert(row);
-    expect(e2?.code).toBe("23505"); // PG unique violation
+    expect(e2?.code).toBe("23505");
   });
 
-  it("ALLOWS multiple classifications per reply at different prompt versions", async () => {
-    const replyId = await newSentinelReply("multi-version");
+  it("ALLOWS multiple classifications per thread at different prompt versions", async () => {
+    const threadId = await newSentinelThread();
     const sb = supabase();
     const { error: e1 } = await sb.from("prw_classifications").insert({
-      reply_id: replyId,
+      thread_id: threadId,
       praise_score: 10,
       specificity_score: 10,
       authenticity_score: 10,
@@ -100,7 +104,7 @@ describe("prw_classifications writes", () => {
     });
     expect(e1).toBeNull();
     const { error: e2 } = await sb.from("prw_classifications").insert({
-      reply_id: replyId,
+      thread_id: threadId,
       praise_score: 25,
       specificity_score: 25,
       authenticity_score: 25,
@@ -110,11 +114,10 @@ describe("prw_classifications writes", () => {
     });
     expect(e2).toBeNull();
 
-    // Both rows should be present.
     const { data } = await sb
       .from("prw_classifications")
       .select("prompt_version, total_score")
-      .eq("reply_id", replyId)
+      .eq("thread_id", threadId)
       .order("prompt_version", { ascending: true });
     expect(data?.length).toBe(2);
     expect(data?.[0].prompt_version).toBe("test-vitest-v0");
@@ -124,10 +127,10 @@ describe("prw_classifications writes", () => {
   });
 
   it("ON CONFLICT DO NOTHING returns 0 inserts on a re-upsert (the orchestrator path)", async () => {
-    const replyId = await newSentinelReply("conflict-skip");
+    const threadId = await newSentinelThread();
     const sb = supabase();
     const row = {
-      reply_id: replyId,
+      thread_id: threadId,
       praise_score: 15,
       specificity_score: 15,
       authenticity_score: 15,
@@ -138,21 +141,19 @@ describe("prw_classifications writes", () => {
 
     const { data: first } = await sb
       .from("prw_classifications")
-      .upsert([row], { onConflict: "reply_id,prompt_version", ignoreDuplicates: true })
+      .upsert([row], { onConflict: "thread_id,prompt_version", ignoreDuplicates: true })
       .select("id");
     expect(first?.length).toBe(1);
 
     const { data: second, error } = await sb
       .from("prw_classifications")
-      .upsert([row], { onConflict: "reply_id,prompt_version", ignoreDuplicates: true })
+      .upsert([row], { onConflict: "thread_id,prompt_version", ignoreDuplicates: true })
       .select("id");
     expect(error).toBeNull();
     expect(second?.length).toBe(0);
   });
 
-  it("constants from classify.ts match expected values", () => {
-    // PROMPT_VERSION import is just a sanity thread — if classify.ts changes
-    // this check tells the reader something is up.
+  it("PROMPT_VERSION matches the v2.x convention", () => {
     expect(PROMPT_VERSION).toMatch(/^v\d+\.\d+/);
   });
 });

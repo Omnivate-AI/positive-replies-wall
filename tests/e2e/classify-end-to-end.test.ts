@@ -1,10 +1,11 @@
 /**
- * E2E test: real OpenRouter call + real Supabase write through the public
- * `runClassifyBatch` entry point.
+ * E2E test: real OpenRouter call + real Supabase write through `runClassifyBatch`
+ * under the v2.0 thread+messages schema.
  *
- * Strategy: insert a sentinel reply, classify only that reply (replyIds filter),
- * verify a classification row landed with valid sub-scores, then re-run and
- * verify idempotency (no second classification at the same prompt_version).
+ * Strategy: insert a sentinel thread + qualifying inbound message, classify only
+ * that thread (threadIds filter), verify a classification row landed with valid
+ * sub-scores plus the new highlight + suggested_redactions fields, then re-run
+ * and verify idempotency.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -12,40 +13,53 @@ import { supabase } from "../../trigger/lib/supabase.js";
 import { runClassifyBatch } from "../../trigger/lib/classify-batch.js";
 import { PROMPT_VERSION } from "../../trigger/lib/classify.js";
 
-const SENTINEL_PREFIX = "test-vitest-e2e-classify-";
+const SENTINEL_LEAD_ID = 999_111_111;
+const SENTINEL_CAMPAIGN_ID = 999_111_111;
 
-const SUPERLATIVE_REPLY = {
-  smartlead_lead_id: 999_111_111,
-  smartlead_campaign_id: 999_111_111,
+const SUPERLATIVE_THREAD = {
+  smartlead_lead_id: SENTINEL_LEAD_ID,
+  smartlead_campaign_id: SENTINEL_CAMPAIGN_ID,
   smartlead_client_id: 999_111_111,
-  reply_from_email: "mauritz.gilfillan@jellyfish.com",
-  reply_subject: "Re: e2e test",
-  reply_body_html:
-    "<p>Hi Omar,</p><p>Thank you so much for this email! I have to say, this is one of the best cold/outbound emails I've received in years. It really stood out.</p>",
-  reply_received_at: "2026-01-01T00:00:00.000Z",
+  smartlead_campaign_lead_map_id: 999_111_111,
+  lead_email: "mauritz.gilfillan@jellyfish.com",
   lead_first_name: "Mauritz",
   lead_last_name: "Gilfillan",
-  lead_company_name: "Jellyfish",
+  company_name: "Jellyfish",
 };
 
-let sentinelReplyId: number;
+const SUPERLATIVE_MESSAGE_BODY =
+  "<p>Hi Omar,</p><p>Thank you so much for this email! I have to say, this is one of the best cold/outbound emails I've received in years. It really stood out.</p>";
+
+let sentinelThreadId: number;
 
 async function cleanup() {
   await supabase()
-    .from("prw_replies")
+    .from("prw_threads")
     .delete()
-    .like("smartlead_message_id", `${SENTINEL_PREFIX}%`);
+    .eq("smartlead_campaign_id", SENTINEL_CAMPAIGN_ID);
 }
 
 beforeAll(async () => {
   await cleanup();
-  const { data, error } = await supabase()
-    .from("prw_replies")
-    .insert({ ...SUPERLATIVE_REPLY, smartlead_message_id: `${SENTINEL_PREFIX}superlative` })
+  const { data: thread, error: tErr } = await supabase()
+    .from("prw_threads")
+    .insert(SUPERLATIVE_THREAD)
     .select("id")
     .single();
-  if (error) throw new Error(`E2E setup: ${error.message}`);
-  sentinelReplyId = (data as { id: number }).id;
+  if (tErr) throw new Error(`E2E setup thread: ${tErr.message}`);
+  sentinelThreadId = (thread as { id: number }).id;
+
+  const { error: mErr } = await supabase().from("prw_messages").insert({
+    thread_id: sentinelThreadId,
+    smartlead_message_id: `<test-vitest-e2e-classify-superlative>`,
+    direction: "inbound",
+    is_qualifying_reply: true,
+    from_email: "mauritz.gilfillan@jellyfish.com",
+    subject: "Re: e2e test",
+    body_html: SUPERLATIVE_MESSAGE_BODY,
+    sent_at: "2026-01-01T00:00:00.000Z",
+  });
+  if (mErr) throw new Error(`E2E setup message: ${mErr.message}`);
 });
 
 afterAll(async () => {
@@ -56,38 +70,50 @@ describe("End-to-end classification", () => {
   it(
     "first run: classifies the superlative sentinel and writes a valid row",
     async () => {
-      const stats = await runClassifyBatch({ replyIds: [sentinelReplyId] });
+      const stats = await runClassifyBatch({ threadIds: [sentinelThreadId] });
       expect(stats.errors, JSON.stringify(stats.errors)).toEqual([]);
-      expect(stats.repliesPending).toBe(1);
-      expect(stats.repliesClassified).toBe(1);
-      expect(stats.repliesHighQuality).toBe(1);
+      expect(stats.threadsPending).toBe(1);
+      expect(stats.threadsClassified).toBe(1);
+      expect(stats.threadsHighQuality).toBe(1);
 
       const { data, error } = await supabase()
         .from("prw_classifications")
-        .select("praise_score, specificity_score, authenticity_score, standalone_score, total_score, is_high_quality, categories, prompt_version")
-        .eq("reply_id", sentinelReplyId)
+        .select(
+          "praise_score, specificity_score, authenticity_score, standalone_score, total_score, is_high_quality, categories, prompt_version, suggested_highlight_text, suggested_redactions",
+        )
+        .eq("thread_id", sentinelThreadId)
         .eq("prompt_version", PROMPT_VERSION)
         .single();
 
       expect(error).toBeNull();
       expect(data).toBeTruthy();
       expect(data!.is_high_quality).toBe(true);
-      expect(data!.total_score).toBeGreaterThanOrEqual(55);
-      // Mauritz's reply should hit the rubric ceiling territory (>=85 in calibration).
       expect(data!.total_score).toBeGreaterThanOrEqual(80);
       expect(data!.categories).toContain("superlative");
       expect(data!.prompt_version).toBe(PROMPT_VERSION);
+      // v2.0: highlight should be a non-empty verbatim phrase from the reply.
+      expect(typeof data!.suggested_highlight_text).toBe("string");
+      expect((data!.suggested_highlight_text as string).length).toBeGreaterThan(0);
+      expect(Array.isArray(data!.suggested_redactions)).toBe(true);
+
+      // Highlight should have been propagated to prw_threads.highlight_text.
+      const { data: thread } = await supabase()
+        .from("prw_threads")
+        .select("highlight_text")
+        .eq("id", sentinelThreadId)
+        .single();
+      expect(thread?.highlight_text).toBeTruthy();
     },
     180_000,
   );
 
   it(
-    "second run: idempotent — already-classified reply is filtered out before the OpenRouter call",
+    "second run: idempotent — already-classified thread is filtered out before the OpenRouter call",
     async () => {
-      const stats = await runClassifyBatch({ replyIds: [sentinelReplyId] });
+      const stats = await runClassifyBatch({ threadIds: [sentinelThreadId] });
       expect(stats.errors, JSON.stringify(stats.errors)).toEqual([]);
-      expect(stats.repliesPending).toBe(0);
-      expect(stats.repliesClassified).toBe(0);
+      expect(stats.threadsPending).toBe(0);
+      expect(stats.threadsClassified).toBe(0);
     },
     60_000,
   );

@@ -4,8 +4,8 @@
  * the local runner, and tests.
  *
  * Idempotency model: each classification is keyed in DB on
- * `UNIQUE(reply_id, prompt_version)`. Bumping PROMPT_VERSION here triggers
- * re-classification of every reply on the next batch run.
+ * `UNIQUE(thread_id, prompt_version)`. Bumping PROMPT_VERSION here triggers
+ * re-classification of every thread on the next batch run.
  */
 
 import { z } from "zod";
@@ -16,7 +16,14 @@ import { chatJson, type ChatMessage } from "./openrouter.js";
 
 /**
  * Bump this when the prompt content changes. Bumping triggers a re-classification
- * of every reply on the next batch run because of UNIQUE(reply_id, prompt_version).
+ * of every thread on the next batch run because of UNIQUE(thread_id, prompt_version).
+ *
+ * v2.0: thread+messages restructure. Output adds `suggested_highlight_text`
+ * (the killer phrase shown on the public wall) and `suggested_redactions`
+ * (third-party names mentioned in the body that need black-bar masking).
+ * Lead's own first/last/company names are auto-redacted at ingest from the
+ * matched outbound-repo lead row, so the model focuses on names IT sees in
+ * the body that aren't already on that list.
  *
  * v1.2: stricter on offer-vs-outreach distinction. Replies that praise the
  * offer/work ("it sounds interesting what you do") without naming a concrete
@@ -27,7 +34,7 @@ import { chatJson, type ChatMessage } from "./openrouter.js";
  * stripped, UTF-8 mojibake normalized). Quiz + wall render this saved cleaned
  * text so the human reads exactly what the AI scored.
  */
-export const PROMPT_VERSION = "v1.2";
+export const PROMPT_VERSION = "v2.0";
 
 /** M4 categories, mirrored as a Zod enum so the model's output is validated. */
 export const CATEGORY_ENUM = [
@@ -59,6 +66,16 @@ export const ClassifyResultSchema = z.object({
   is_high_quality: z.boolean(),
   categories: z.array(z.enum(CATEGORY_ENUM)),
   reasoning: z.string().min(1).max(2000),
+  /** v2.0+: the public-wall highlight — a verbatim phrase from cleaned_reply_text
+   * that captures the killer praise (e.g. "this is a killer email", "best cold
+   * email I've received in years"). Empty string when the reply doesn't merit
+   * a highlight (e.g. is_high_quality=false). */
+  suggested_highlight_text: z.string().max(500).default(""),
+  /** v2.0+: third-party human/company names mentioned IN the reply body that
+   * should be black-barred on the public wall — e.g. a colleague the lead
+   * forwarded the email to, or a company being referenced. Lead's own
+   * first/last/company name is NOT included (auto-redacted at ingest). */
+  suggested_redactions: z.array(z.string().max(120)).default([]),
 });
 export type ClassifyResult = z.infer<typeof ClassifyResultSchema>;
 
@@ -193,10 +210,27 @@ function postProcess(parsed: ClassifyResult): ClassifyResult {
     parsed.specificity_score +
     parsed.authenticity_score +
     parsed.standalone_score;
+  const isHigh = total >= HIGH_QUALITY_THRESHOLD;
+  // Suppress highlight when the reply isn't publish-worthy. Otherwise the
+  // wall could pick up a "killer phrase" from a thread we're never going to
+  // show.
+  const highlight = isHigh ? normalizeEncoding(parsed.suggested_highlight_text).trim() : "";
+  // Dedupe + trim suggested redactions; drop empty strings.
+  const seen = new Set<string>();
+  const redactions: string[] = [];
+  for (const r of parsed.suggested_redactions) {
+    const t = normalizeEncoding(r).trim();
+    if (t.length < 2) continue;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    redactions.push(t);
+  }
   return {
     ...parsed,
     cleaned_reply_text: normalizeEncoding(parsed.cleaned_reply_text).trim(),
-    is_high_quality: total >= HIGH_QUALITY_THRESHOLD,
+    is_high_quality: isHigh,
+    suggested_highlight_text: highlight,
+    suggested_redactions: redactions,
   };
 }
 

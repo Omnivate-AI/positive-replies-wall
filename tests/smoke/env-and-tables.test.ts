@@ -1,7 +1,7 @@
 /**
  * Smoke tests — fast health checks that should pass on every push.
- * Verifies: required env vars are present, Supabase reachable, all 5 prw_*
- * tables exist with the expected column counts, Smartlead API reachable.
+ * Verifies: required env vars are present, Supabase reachable, all v2.0
+ * prw_* tables exist, Smartlead API reachable.
  */
 
 import { describe, it, expect } from "vitest";
@@ -26,34 +26,26 @@ describe("Required env vars", () => {
 });
 
 describe("Supabase health", () => {
-  it("can reach the project and read prw_replies", async () => {
+  it("can reach the project and read prw_threads", async () => {
     const { error } = await supabase()
-      .from("prw_replies")
+      .from("prw_threads")
       .select("id", { count: "exact", head: true });
     expect(error).toBeNull();
   });
 
-  // Column counts are baked at migration time — drift here means the migration
-  // ran differently than expected, or a column was added without updating tests.
-  const EXPECTED_COLS: Record<string, number> = {
-    prw_replies: 23,
-    prw_classifications: 12,
-    prw_publish_state: 6,
-    prw_redactions: 6,
-    prw_ingest_runs: 12,
-  };
+  // v2.0 tables only — prw_replies and prw_ingest_runs are gone after migration 003.
+  const TABLES = [
+    "prw_threads",
+    "prw_messages",
+    "prw_classifications",
+    "prw_redactions",
+    "prw_publish_state",
+  ];
 
-  it.each(Object.entries(EXPECTED_COLS))(
-    "table %s is reachable (column-count budget: %i)",
-    async (table, expectedCols) => {
-      // Read 0 rows: succeeds iff the table exists and we have read access.
-      // Column-count is asserted at migration apply time and re-verified manually
-      // when changing schema; this test catches the cheap case of "table missing".
-      const { error: tableErr } = await supabase().from(table).select("*").limit(0);
-      expect(tableErr, `${table} not reachable: ${tableErr?.message}`).toBeNull();
-      expect(expectedCols).toBeGreaterThan(0);
-    },
-  );
+  it.each(TABLES)("table %s is reachable", async (table) => {
+    const { error: tableErr } = await supabase().from(table).select("*").limit(0);
+    expect(tableErr, `${table} not reachable: ${tableErr?.message}`).toBeNull();
+  });
 });
 
 describe("Smartlead health", () => {

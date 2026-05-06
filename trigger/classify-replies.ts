@@ -4,9 +4,9 @@
  * Wraps trigger/lib/classify-batch.ts. The same batch logic also runs locally via
  * `npm run classify:local` (see scripts/classify-local.ts).
  *
- * Idempotent: each classification is keyed on UNIQUE(reply_id, prompt_version).
+ * Idempotent: each classification is keyed on UNIQUE(thread_id, prompt_version).
  * Re-running with the same prompt version is a no-op; bumping PROMPT_VERSION
- * (see trigger/lib/classify.ts) re-classifies every reply on the next run.
+ * (see trigger/lib/classify.ts) re-classifies every thread on the next run.
  */
 
 import { logger, task } from "@trigger.dev/sdk";
@@ -29,9 +29,11 @@ export const classifyReplies = task({
     });
     logger.info("Classification finished", {
       promptVersion: stats.promptVersion,
-      pending: stats.repliesPending,
-      classified: stats.repliesClassified,
-      highQuality: stats.repliesHighQuality,
+      pending: stats.threadsPending,
+      classified: stats.threadsClassified,
+      highQuality: stats.threadsHighQuality,
+      highlightsApplied: stats.highlightsApplied,
+      redactionsSeeded: stats.redactionsSeeded,
       errorCount: stats.errors.length,
     });
     return stats;

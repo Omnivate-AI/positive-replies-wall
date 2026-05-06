@@ -10,7 +10,7 @@ export default defineConfig({
     fileParallelism: false,
     testTimeout: 60_000,
     hookTimeout: 30_000,
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.{ts,tsx}"],
     // Per-bucket timeouts handled inside each test via vitest's `it.concurrent`/timeouts.
     reporters: ["default"],
   },

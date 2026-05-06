@@ -1,86 +1,188 @@
 import { describe, it, expect } from "vitest";
-import { toReplyRow } from "../../trigger/lib/mappers.js";
+import {
+  toThreadInsert,
+  toMessageInsert,
+  redactionsFromLead,
+  type MatchedLead,
+} from "../../trigger/lib/mappers.js";
 import {
   fixtureCampaign,
   fixtureClient,
   fixtureLeadEntry,
   fixtureReplyMessage,
+  fixtureSentMessage,
 } from "../_helpers/fixtures.js";
 
-describe("toReplyRow", () => {
-  it("maps a full Smartlead reply into a ReplyRow with every field populated", () => {
-    const row = toReplyRow(fixtureClient, fixtureCampaign, fixtureLeadEntry, fixtureReplyMessage);
+describe("toThreadInsert", () => {
+  it("denormalizes the matched-lead snapshot when a lead row is matched", () => {
+    const matched: MatchedLead = {
+      id: 99,
+      first_name: "Mark",
+      last_name: "Richards",
+      email: "mrichards@heru.net",
+      title: "Director of Product",
+      linkedin_url: "https://www.linkedin.com/in/markrrichards",
+      company_name: "Heru",
+      company_website: "https://www.seeheru.com",
+      company_linkedin_url: "https://www.linkedin.com/company/heru",
+    };
 
-    expect(row.smartlead_message_id).toBe(fixtureReplyMessage.message_id);
+    const row = toThreadInsert({
+      client: fixtureClient,
+      campaign: fixtureCampaign,
+      leadEntry: fixtureLeadEntry,
+      campaignRegistryId: 42,
+      leadTable: "orbitalx_leads",
+      matchedLead: matched,
+    });
+
     expect(row.smartlead_lead_id).toBe(fixtureLeadEntry.lead.id);
     expect(row.smartlead_campaign_id).toBe(fixtureCampaign.id);
     expect(row.smartlead_client_id).toBe(fixtureClient.id);
-    expect(row.smartlead_stats_id).toBe(fixtureReplyMessage.stats_id);
+    expect(row.campaign_registry_id).toBe(42);
+    expect(row.lead_table).toBe("orbitalx_leads");
+    expect(row.lead_id).toBe(99);
 
-    expect(row.reply_from_email).toBe(fixtureReplyMessage.from);
-    expect(row.reply_to_email).toBe(fixtureReplyMessage.to);
-    expect(row.reply_subject).toBe(fixtureReplyMessage.subject);
-    expect(row.reply_body_html).toBe(fixtureReplyMessage.email_body);
-    expect(row.reply_received_at).toBe(fixtureReplyMessage.time);
-
-    expect(row.lead_email).toBe(fixtureLeadEntry.lead.email);
     expect(row.lead_first_name).toBe("Mark");
-    expect(row.lead_last_name).toBe("Richards");
-    expect(row.lead_company_name).toBe("Heru");
-    expect(row.lead_company_url).toBe("https://www.seeheru.com");
-    expect(row.lead_linkedin_profile).toBe("https://www.linkedin.com/in/markrrichards");
-    expect(row.lead_category_id).toBe(1);
-
+    expect(row.lead_title).toBe("Director of Product");
+    expect(row.lead_linkedin_url).toBe(matched.linkedin_url);
+    expect(row.company_website).toBe(matched.company_website);
+    expect(row.company_linkedin_url).toBe(matched.company_linkedin_url);
     expect(row.unibox_url).toBe(
       `https://app.smartlead.ai/app/master-inbox?leadMap=${fixtureLeadEntry.campaign_lead_map_id}`,
     );
-
-    // Raw payload preserved verbatim — protects against schema drift in Smartlead.
-    expect(row.raw_lead_json).toEqual(fixtureLeadEntry);
-    expect(row.raw_message_json).toEqual(fixtureReplyMessage);
   });
 
-  it("captures the FORWARDED-reply case: reply_from_email != lead_email", () => {
-    // From M2 finding: Mark Richards forwarded to Jordan, who replied. The wall must
-    // attribute the reply to its actual sender, not the lead we originally targeted.
-    const row = toReplyRow(fixtureClient, fixtureCampaign, fixtureLeadEntry, fixtureReplyMessage);
-    expect(row.reply_from_email).toBe("jordan@grayhouse.consulting");
+  it("falls back to Smartlead snapshot fields when no outbound-repo match", () => {
+    const row = toThreadInsert({
+      client: fixtureClient,
+      campaign: fixtureCampaign,
+      leadEntry: fixtureLeadEntry,
+      campaignRegistryId: null,
+      leadTable: "orbitalx_leads",
+      matchedLead: null,
+    });
+
+    expect(row.lead_id).toBeNull();
+    expect(row.lead_table).toBeNull(); // table only set when match exists
+    expect(row.lead_first_name).toBe("Mark");
     expect(row.lead_email).toBe("mrichards@heru.net");
-    expect(row.reply_from_email).not.toBe(row.lead_email);
+    expect(row.lead_linkedin_url).toBe(fixtureLeadEntry.lead.linkedin_profile);
+    expect(row.company_name).toBe("Heru");
+    expect(row.company_website).toBe("https://www.seeheru.com");
+    expect(row.company_linkedin_url).toBeNull(); // not in Smartlead payload
+    expect(row.lead_title).toBeNull(); // not in Smartlead payload
   });
 
-  it("falls back from null client to campaign.client_id", () => {
-    const row = toReplyRow(null, fixtureCampaign, fixtureLeadEntry, fixtureReplyMessage);
+  it("uses valda's company_linkedin column when company_linkedin_url is missing", () => {
+    const matched: MatchedLead = {
+      id: 5,
+      company_linkedin: "https://linkedin.com/company/valda",
+    };
+    const row = toThreadInsert({
+      client: fixtureClient,
+      campaign: fixtureCampaign,
+      leadEntry: fixtureLeadEntry,
+      campaignRegistryId: null,
+      leadTable: "valda_leads",
+      matchedLead: matched,
+    });
+    expect(row.company_linkedin_url).toBe("https://linkedin.com/company/valda");
+  });
+
+  it("falls back null client → campaign.client_id", () => {
+    const row = toThreadInsert({
+      client: null,
+      campaign: fixtureCampaign,
+      leadEntry: fixtureLeadEntry,
+      campaignRegistryId: null,
+      leadTable: null,
+      matchedLead: null,
+    });
     expect(row.smartlead_client_id).toBe(fixtureCampaign.client_id);
   });
+});
 
-  it("returns null client_id when both client and campaign.client_id are null", () => {
-    const row = toReplyRow(
-      null,
-      { ...fixtureCampaign, client_id: null },
-      fixtureLeadEntry,
-      fixtureReplyMessage,
-    );
-    expect(row.smartlead_client_id).toBeNull();
+describe("toMessageInsert", () => {
+  it("classifies SENT messages as outbound", () => {
+    const msg = toMessageInsert(7, fixtureSentMessage);
+    expect(msg.thread_id).toBe(7);
+    expect(msg.direction).toBe("outbound");
+    expect(msg.smartlead_email_seq_number).toBe(1);
+    expect(msg.from_email).toBe(fixtureSentMessage.from);
+    expect(msg.subject).toBe(fixtureSentMessage.subject);
+    expect(msg.body_html).toBe(fixtureSentMessage.email_body);
+    expect(msg.is_qualifying_reply).toBe(false);
+    expect(msg.raw_smartlead_json).toEqual(fixtureSentMessage);
   });
 
-  it("converts undefined optional fields to null (DB-friendly)", () => {
-    const sparseLead = {
-      ...fixtureLeadEntry,
-      lead: {
-        ...fixtureLeadEntry.lead,
-        first_name: null,
-        last_name: null,
-        company_name: null,
-        company_url: null,
-        linkedin_profile: null,
-      },
+  it("classifies a non-SDR-domain REPLY as inbound", () => {
+    const msg = toMessageInsert(7, fixtureReplyMessage);
+    expect(msg.direction).toBe("inbound");
+    expect(msg.from_email).toBe("jordan@grayhouse.consulting");
+  });
+
+  it("classifies an SDR-domain REPLY as outbound (SDR replying inside the inbox)", () => {
+    const sdrReply = {
+      ...fixtureReplyMessage,
+      type: "REPLY" as const,
+      from: "andrew@getomnivate.com",
     };
-    const sparseMsg = { ...fixtureReplyMessage, to: undefined as unknown as string, subject: null };
-    const row = toReplyRow(fixtureClient, fixtureCampaign, sparseLead, sparseMsg);
-    expect(row.lead_first_name).toBeNull();
-    expect(row.lead_company_name).toBeNull();
-    expect(row.reply_to_email).toBeNull();
-    expect(row.reply_subject).toBeNull();
+    const msg = toMessageInsert(7, sdrReply);
+    expect(msg.direction).toBe("outbound");
+  });
+});
+
+describe("redactionsFromLead", () => {
+  it("yields first/last/company/email from the matched lead, deduped", () => {
+    const out = redactionsFromLead({
+      leadEntry: fixtureLeadEntry,
+      matchedLead: {
+        id: 1,
+        first_name: "Mark",
+        last_name: "Richards",
+        email: "mark@heru.net",
+        company_name: "Heru",
+      },
+    });
+    expect(out).toEqual(["Mark", "Richards", "Heru", "mark@heru.net"]);
+  });
+
+  it("falls back to Smartlead lead fields when no match", () => {
+    const out = redactionsFromLead({ leadEntry: fixtureLeadEntry, matchedLead: null });
+    expect(out).toEqual(["Mark", "Richards", "Heru", "mrichards@heru.net"]);
+  });
+
+  it("skips SDR first names and length-1 names", () => {
+    const out = redactionsFromLead({
+      leadEntry: {
+        ...fixtureLeadEntry,
+        lead: {
+          ...fixtureLeadEntry.lead,
+          first_name: "Andrew", // SDR — must be kept visible
+          last_name: "X", // length 1 — too aggressive to mask
+          company_name: "Heru",
+        },
+      },
+      matchedLead: null,
+    });
+    // SDR first name + length-1 last name skipped; email + company kept.
+    expect(out).toEqual(["Heru", "mrichards@heru.net"]);
+  });
+
+  it("returns email-only when names + company are absent", () => {
+    const out = redactionsFromLead({
+      leadEntry: {
+        ...fixtureLeadEntry,
+        lead: {
+          ...fixtureLeadEntry.lead,
+          first_name: null,
+          last_name: null,
+          company_name: null,
+        },
+      },
+      matchedLead: null,
+    });
+    expect(out).toEqual(["mrichards@heru.net"]);
   });
 });

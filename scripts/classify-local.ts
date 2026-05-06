@@ -3,10 +3,10 @@
  * Trigger.dev task, minus the Trigger runtime.
  *
  * Usage:
- *   npm run classify:local                          # classify all unclassified at current prompt version
- *   npm run classify:local -- --reply-id 123,456    # only specific replies
- *   npm run classify:local -- --limit 10            # cap how many to classify (useful for prompt iteration)
- *   npm run classify:local -- --concurrency 3       # tune parallel OpenRouter calls
+ *   npm run classify:local                            # classify all unclassified at current prompt version
+ *   npm run classify:local -- --thread-id 123,456     # only specific threads
+ *   npm run classify:local -- --limit 10              # cap how many to classify
+ *   npm run classify:local -- --concurrency 3         # tune parallel OpenRouter calls
  */
 
 import * as dotenv from "dotenv";
@@ -20,19 +20,19 @@ function parseArg(name: string): string | undefined {
   return process.argv[idx + 1];
 }
 
-const replyIdArg = parseArg("reply-id");
+const threadIdArg = parseArg("thread-id");
 const limitArg = parseArg("limit");
 const concurrencyArg = parseArg("concurrency");
 
 const opts: ClassifyBatchOptions = {
-  replyIds: replyIdArg ? replyIdArg.split(",").map(Number) : undefined,
+  threadIds: threadIdArg ? threadIdArg.split(",").map(Number) : undefined,
   limit: limitArg ? Number(limitArg) : undefined,
   concurrency: concurrencyArg ? Number(concurrencyArg) : undefined,
   onProgress: (msg) => console.log(msg),
 };
 
 console.log("Starting local classify batch:", {
-  replyIds: opts.replyIds,
+  threadIds: opts.threadIds,
   limit: opts.limit,
   concurrency: opts.concurrency,
 });

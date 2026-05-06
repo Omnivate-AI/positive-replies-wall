@@ -98,8 +98,8 @@ describe("HIGH_QUALITY_THRESHOLD", () => {
 });
 
 describe("PROMPT_VERSION", () => {
-  it("is v1.2 (stricter offer/outreach distinction)", () => {
-    expect(PROMPT_VERSION).toBe("v1.2");
+  it("is v2.0 (thread+messages restructure with highlight + redaction outputs)", () => {
+    expect(PROMPT_VERSION).toBe("v2.0");
   });
 });
 
