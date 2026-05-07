@@ -28,10 +28,25 @@ import { schedules, logger } from "@trigger.dev/sdk";
 import { ingestSmartleadReplies } from "./ingest-smartlead-replies.js";
 import { classifyReplies } from "./classify-replies.js";
 
-interface RunSummary {
-  ingest: { ok: boolean; runId?: string; threadsInserted?: number; error?: string };
-  classify: { ok: boolean; runId?: string; classified?: number; highQuality?: number; error?: string };
+interface StageSummary {
+  ok: boolean;
+  runId?: string;
+  error?: string;
 }
+interface IngestSummary extends StageSummary {
+  threadsInserted?: number;
+}
+interface ClassifySummary extends StageSummary {
+  classified?: number;
+  highQuality?: number;
+}
+interface RunSummary {
+  ingest: IngestSummary;
+  classify: ClassifySummary;
+}
+
+const errString = (e: unknown): string =>
+  e instanceof Error ? e.message : String(e ?? "unknown");
 
 export const scheduledIngestAndClassify = schedules.task({
   id: "scheduled-ingest-and-classify",
@@ -46,44 +61,59 @@ export const scheduledIngestAndClassify = schedules.task({
       classify: { ok: false },
     };
 
-    // 1. Ingest. Empty payload = full sweep across all clients/campaigns.
-    const ingestResult = await ingestSmartleadReplies.triggerAndWait({});
-    if (ingestResult.ok) {
-      summary.ingest = {
-        ok: true,
-        runId: ingestResult.id,
-        threadsInserted: ingestResult.output.threadsInserted,
-      };
-      logger.info("Ingest finished", { ingest: summary.ingest });
-    } else {
-      summary.ingest = {
-        ok: false,
-        runId: ingestResult.id,
-        error: ingestResult.error instanceof Error ? ingestResult.error.message : String(ingestResult.error ?? "unknown"),
-      };
-      logger.error("Ingest failed — continuing to classify", { ingest: summary.ingest });
-      // Deliberately continuing — classify is independent.
+    // ── Stage 1: Ingest ────────────────────────────────────────────────────
+    // Each stage is wrapped in its own try/catch so an exception in one
+    // CANNOT prevent the next stage from running. (The earlier version of
+    // this task crashed silently between stages when `result.output` was
+    // undefined, leaving the daily run with ingest done but classify never
+    // fired.)
+    logger.info("Entering stage: ingest");
+    try {
+      const r = await ingestSmartleadReplies.triggerAndWait({});
+      if (r.ok) {
+        summary.ingest = {
+          ok: true,
+          runId: r.id,
+          threadsInserted: r.output?.threadsInserted ?? 0,
+        };
+      } else {
+        summary.ingest = {
+          ok: false,
+          runId: r.id,
+          error: errString(r.error),
+        };
+      }
+    } catch (e) {
+      summary.ingest = { ok: false, error: errString(e) };
+      logger.error("Ingest stage threw", { error: errString(e) });
     }
+    logger.info("Stage done: ingest", { ingest: summary.ingest });
 
-    // 2. Classify. Empty payload = classify all unclassified threads at the
-    // latest prompt_version.
-    const classifyResult = await classifyReplies.triggerAndWait({});
-    if (classifyResult.ok) {
-      summary.classify = {
-        ok: true,
-        runId: classifyResult.id,
-        classified: classifyResult.output.threadsClassified,
-        highQuality: classifyResult.output.threadsHighQuality,
-      };
-      logger.info("Classify finished", { classify: summary.classify });
-    } else {
-      summary.classify = {
-        ok: false,
-        runId: classifyResult.id,
-        error: classifyResult.error instanceof Error ? classifyResult.error.message : String(classifyResult.error ?? "unknown"),
-      };
-      logger.error("Classify failed", { classify: summary.classify });
+    // ── Stage 2: Classify ──────────────────────────────────────────────────
+    // Independent of ingest's outcome — classify can catch up older
+    // unclassified threads even if today's ingest pulled nothing new.
+    logger.info("Entering stage: classify");
+    try {
+      const r = await classifyReplies.triggerAndWait({});
+      if (r.ok) {
+        summary.classify = {
+          ok: true,
+          runId: r.id,
+          classified: r.output?.threadsClassified ?? 0,
+          highQuality: r.output?.threadsHighQuality ?? 0,
+        };
+      } else {
+        summary.classify = {
+          ok: false,
+          runId: r.id,
+          error: errString(r.error),
+        };
+      }
+    } catch (e) {
+      summary.classify = { ok: false, error: errString(e) };
+      logger.error("Classify stage threw", { error: errString(e) });
     }
+    logger.info("Stage done: classify", { classify: summary.classify });
 
     logger.info("Daily run summary", { summary });
     return summary;

@@ -96,13 +96,16 @@ describe("End-to-end classification", () => {
       expect((data!.suggested_highlight_text as string).length).toBeGreaterThan(0);
       expect(Array.isArray(data!.suggested_redactions)).toBe(true);
 
-      // Highlight should have been propagated to prw_threads.highlight_text.
-      const { data: thread } = await supabase()
-        .from("prw_threads")
-        .select("highlight_text")
-        .eq("id", sentinelThreadId)
-        .single();
-      expect(thread?.highlight_text).toBeTruthy();
+      // Highlight should have been written to prw_highlights with
+      // source='auto_classifier'. (Migration 004 moved highlights off
+      // prw_threads.highlight_text — that column is now dormant.)
+      const { data: highlights } = await supabase()
+        .from("prw_highlights")
+        .select("text, source")
+        .eq("thread_id", sentinelThreadId)
+        .eq("source", "auto_classifier");
+      expect(highlights?.length ?? 0).toBeGreaterThan(0);
+      expect((highlights![0].text as string).length).toBeGreaterThan(0);
     },
     180_000,
   );
