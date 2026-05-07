@@ -16,9 +16,9 @@
   --color-fg: #18181b; /* zinc-900 */
   --color-fg-muted: #71717a; /* zinc-500 */
   --color-fg-subtle: #a1a1aa; /* zinc-400 */
-  --color-accent: #4f46e5; /* indigo-600 */
-  --color-accent-hover: #4338ca; /* indigo-700 */
-  --color-accent-soft: #eef2ff; /* indigo-50 */
+  --color-accent: #852ddd; /* Omnivate brand purple */
+  --color-accent-hover: #6d24b8; /* darker brand */
+  --color-accent-soft: #f4ecfd; /* light brand wash for backgrounds */
   --color-success: #16a34a; /* green-600 */
   --color-success-soft: #dcfce7; /* green-100 */
   --color-danger: #dc2626; /* red-600 */

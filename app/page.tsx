@@ -1,51 +1,32 @@
 /**
  * / — the public wall.
  *
- * Pulls only published threads with a non-empty highlight, sorted by
- * display_priority ASC, total_score DESC, sent_at DESC. Renders each via
- * EmailReplyCard with the truncated-excerpt body + auto + admin
- * redactions + SDR allowlist applied.
+ * Layout (revamped 2026-05-07 against the testimonial-page reference):
+ *   1. Top bar  — logo + word-mark, Admin link
+ *   2. Hero     — soft Unsplash backdrop + title block, eyebrow + headline + sub
+ *   3. Section heading row — "Wall of replies / What real prospects said"
+ *      with a short description on the right
+ *   4. Wall grid — up to 8 cards initially, then "Show more"
+ *   5. Footer CTA — book-a-call invitation on a soft brand-tinted band
  *
- * Perf: ISR with revalidate=60. Admin actions trigger
- * /api/admin/revalidate which calls revalidatePath('/') so changes
- * surface within seconds, not the 60s window.
+ * Server-rendered. ISR revalidate=60. Resilient against transient
+ * supabase fetch failures (renders empty state, no 500).
  */
 
 import Link from "next/link";
-import { EmailReplyCard } from "@/components/email-reply-card";
-import { buildExcerpt, pickAnchorHighlight } from "@/lib/excerpt";
-import { SDR_FIRST_NAMES } from "@/lib/sdr";
+import { WallGrid } from "@/components/wall-grid";
 import { getPublishedWallThreads } from "@/lib/supabase-public";
 
 export const revalidate = 60;
 
 const BOOK_CALL_URL = "https://app.usemotion.com/meet/omar-almubarak/jzkldtn";
-
-function truncatedBody(body: string, highlights: string[]): {
-  body: string;
-  highlights: string[];
-} {
-  // Anchor truncation on the earliest highlight that exists in the body.
-  // Other highlights still get the purple wash where they appear in the
-  // visible portion (multi-highlight rendering in EmailReplyCard).
-  const anchor = pickAnchorHighlight(body, highlights);
-  const ex = buildExcerpt(body, anchor);
-  const ellipsis = ex.truncated ? "…" : "";
-  if (ex.highlight) {
-    return {
-      body: `${ex.before}${ex.highlight}${ex.after}${ellipsis}`,
-      highlights,
-    };
-  }
-  return { body: `${ex.after}${ellipsis}`, highlights };
-}
+// White wall with soft geometric pattern — picked by Omar from Unsplash.
+// Subtle texture rather than a literal photo, sits in the background at
+// reduced opacity so the headline panel reads clearly above it.
+const HERO_IMAGE =
+  "https://images.unsplash.com/photo-1712148322457-83ca27a083a1?w=2000&q=80&auto=format&fit=crop";
 
 export default async function HomePage() {
-  // Guard against transient Supabase fetch failures so a Node-level
-  // `TypeError: fetch failed` doesn't take the whole page to 500. The
-  // retry loop inside getPublishedWallThreads already handles short
-  // hiccups; this catch handles harder failures (extended outages) by
-  // rendering the empty state.
   let threads: Awaited<ReturnType<typeof getPublishedWallThreads>> = [];
   try {
     threads = await getPublishedWallThreads();
@@ -54,106 +35,176 @@ export default async function HomePage() {
   }
 
   return (
-    <main className="min-h-screen px-6 py-16 sm:px-8 sm:py-20 lg:px-12">
-      <div className="space-y-12">
-        <header className="space-y-4">
-          <div className="flex items-start justify-between gap-4">
-            <p className="text-sm font-medium uppercase tracking-wider text-accent">
+    <main className="min-h-screen bg-bg">
+      {/* ───── Top bar ───── */}
+      <div className="border-b border-border/60 bg-surface/80 backdrop-blur">
+        <div className="flex w-full items-center justify-between px-6 py-4 sm:px-8 lg:px-16">
+          <Link href="/" className="flex items-center gap-2.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt="Omnivate"
+              width={32}
+              height={32}
+              className="h-8 w-8 rounded-full"
+            />
+            <span className="text-sm font-semibold tracking-tight text-fg">
               Positive Replies
-            </p>
+            </span>
+          </Link>
+          <div className="flex items-center gap-3">
+            <a
+              href={BOOK_CALL_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden text-sm font-medium text-fg-muted transition-colors hover:text-fg sm:inline-flex"
+            >
+              Book a call
+            </a>
             <Link
               href="/admin"
-              className="inline-flex items-center gap-1 rounded-button border border-border bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted shadow-button transition-colors hover:border-border-strong hover:text-fg"
+              className="inline-flex items-center gap-1.5 rounded-button border border-border bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted shadow-button transition-colors hover:border-border-strong hover:text-fg"
             >
               Admin
-              <svg
-                className="h-3.5 w-3.5"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.5}
-                aria-hidden="true"
-              >
-                <path
-                  d="M5 3l5 5-5 5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              <Chevron />
             </Link>
           </div>
-          <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-fg sm:text-5xl">
-            Real positive replies from prospects we&rsquo;ve cold-emailed on
-            behalf of our clients.
-          </h1>
-          <p className="max-w-2xl text-base leading-relaxed text-fg-muted">
-            Names redacted. Praise verbatim.
-          </p>
-        </header>
+        </div>
+      </div>
 
+      {/* ───── Hero ───── */}
+      <section className="relative overflow-hidden">
+        {/* Photo is a real backdrop now — no heavy white veil. The image
+         * fills the section at full opacity; only a soft white fade at
+         * top + bottom keeps the topbar / next-section transition smooth
+         * and a translucent backdrop sits behind the headline so the
+         * type stays legible. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={HERO_IMAGE}
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full object-cover opacity-20"
+        />
+        <div className="absolute inset-x-0 top-0 h-24 bg-linear-to-b from-bg to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-32 bg-linear-to-t from-bg to-transparent" />
+        <div className="relative w-full px-6 py-28 sm:px-8 sm:py-36 lg:px-16 lg:py-44">
+          <div className="mx-auto max-w-3xl rounded-card bg-surface/80 p-10 text-center shadow-card-hover backdrop-blur-md sm:p-12">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
+              Wall of replies
+            </p>
+            <h1 className="mt-5 text-4xl font-semibold tracking-tight text-fg sm:text-5xl lg:text-[56px] lg:leading-[1.05]">
+              What real prospects said when we cold-emailed them.
+            </h1>
+            <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-fg-muted sm:text-lg">
+              Verbatim quotes from B2B execs, pulled live from our outbound
+              inboxes. Names redacted. Praise unedited.
+            </p>
+            <div className="mt-10 flex items-center justify-center gap-3">
+              <a
+                href={BOOK_CALL_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-button bg-accent px-6 py-3 text-sm font-medium text-white shadow-button transition-all hover:-translate-y-0.5 hover:bg-accent-hover hover:shadow-card-hover"
+              >
+                Book a call
+                <Chevron />
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ───── Section heading ───── */}
+      <section className="w-full px-6 pt-20 sm:px-8 lg:px-16">
+        <div className="mx-auto max-w-3xl text-center">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">
+            The wall
+          </p>
+          <p className="mt-4 text-base leading-relaxed text-fg-muted">
+            Every reply on this page is a real B2B prospect responding to a cold
+            email we sent on behalf of an Omnivate client. Names are
+            black-barred; everything else is verbatim.
+          </p>
+        </div>
+      </section>
+
+      {/* ───── Wall grid ───── */}
+      <section className="w-full px-6 pt-12 pb-24 sm:px-8 sm:pb-32 lg:px-16">
         {threads.length === 0 ? (
-          <div className="rounded-card border border-dashed border-border bg-bg-subtle p-12 text-center">
+          <div className="rounded-card border border-dashed border-border bg-bg-subtle p-16 text-center">
             <p className="text-sm text-fg-muted">
               No replies are published yet. Check back soon.
             </p>
           </div>
         ) : (
-          <div className="columns-1 gap-5 sm:columns-2 lg:columns-3 xl:columns-4 2xl:columns-5">
-            {threads.map((t) => {
-              const { body, highlights } = truncatedBody(t.body, t.highlights);
-              const allRedactions = (() => {
-                const set = new Set(t.redactions);
-                for (const n of SDR_FIRST_NAMES) set.add(n);
-                // Defense in depth — never rely on prw_redactions alone to
-                // mask the lead's identity or the SDR mailbox.
-                if (t.from_display_name) set.add(t.from_display_name);
-                if (t.from_email) set.add(t.from_email);
-                if (t.to_email) set.add(t.to_email);
-                return Array.from(set);
-              })();
-              return (
-                <div key={t.thread_id} className="mb-5 break-inside-avoid">
-                  <EmailReplyCard
-                    from_email={t.from_email}
-                    from_display_name={t.from_display_name}
-                    to_email={t.to_email}
-                    subject={t.subject}
-                    body={body}
-                    highlights={highlights}
-                    redactions={allRedactions}
-                    received_at={t.received_at}
-                    density="compact"
-                  />
-                </div>
-              );
-            })}
-          </div>
+          <WallGrid threads={threads} />
         )}
+      </section>
 
-        <footer className="flex flex-col items-start gap-4 border-t border-border pt-10 sm:flex-row sm:items-center sm:justify-between">
-          <p className="max-w-md text-sm leading-relaxed text-fg-muted">
-            Want this kind of reply rate from your outbound? Let&rsquo;s talk.
-          </p>
+      {/* ───── Footer CTA ───── */}
+      <section className="border-t border-border bg-accent-soft">
+        <div className="mx-auto flex max-w-7xl flex-col items-center gap-8 px-6 py-20 text-center sm:px-8 sm:py-24 lg:px-16">
+          <div className="max-w-2xl space-y-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
+              Ready when you are
+            </p>
+            <h2 className="text-3xl font-semibold tracking-tight text-fg sm:text-4xl">
+              Want this kind of reply from your outbound?
+            </h2>
+            <p className="text-base leading-relaxed text-fg-muted">
+              We&rsquo;ll show you the tools, the playbook, and how it could
+              work for your team.
+            </p>
+          </div>
           <a
             href={BOOK_CALL_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 rounded-button bg-accent px-5 py-2.5 text-sm font-medium text-white shadow-button transition-colors hover:bg-accent-hover"
+            className="inline-flex items-center gap-2 rounded-button bg-accent px-6 py-3 text-sm font-medium text-white shadow-button transition-all hover:-translate-y-0.5 hover:bg-accent-hover hover:shadow-card-hover"
           >
             Book a call
-            <svg
-              className="h-4 w-4"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.5}
-              aria-hidden="true"
-            >
-              <path d="M5 3l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            <Chevron />
           </a>
-        </footer>
-      </div>
+        </div>
+      </section>
+
+      {/* ───── Footer ───── */}
+      <footer className="border-t border-border bg-surface">
+        <div className="flex w-full flex-col items-start justify-between gap-4 px-6 py-10 sm:flex-row sm:items-center sm:px-8 lg:px-16">
+          <div className="flex items-center gap-2.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt=""
+              width={24}
+              height={24}
+              className="h-6 w-6 rounded-full"
+            />
+            <span className="text-xs font-medium text-fg">
+              AI cold outbound. Engineered, not prompted.
+            </span>
+          </div>
+          <span className="text-xs text-fg-subtle">
+            © {new Date().getFullYear()} Omnivate AI
+          </span>
+        </div>
+      </footer>
     </main>
+  );
+}
+
+function Chevron() {
+  return (
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      aria-hidden="true"
+    >
+      <path d="M5 3l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
