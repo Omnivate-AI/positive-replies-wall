@@ -374,6 +374,7 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
           <div className="flex items-center justify-between gap-2">
             <Link
               href="/"
+              prefetch={false}
               className="flex min-w-0 items-center gap-2 transition-opacity hover:opacity-80"
               aria-label="Back to wall"
             >
