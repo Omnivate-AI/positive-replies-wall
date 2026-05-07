@@ -336,16 +336,19 @@ export async function getPublishedWallThreads(): Promise<WallThread[]> {
     })
     .filter((t) => t._ok)
     .sort((a, b) => {
-      // display_priority ASC (lower number = more prominent? actually higher
-      // is more prominent per the schema comment, so DESC). total_score DESC.
-      // sent_at DESC.
+      // display_priority DESC first (pin-to-top override — admin sets > 0 to
+      // float a thread above the date stream), then sent_at DESC so newest
+      // reply is on top within each priority tier. Threads missing a sent_at
+      // fall to the bottom of their tier.
       if (a._sortKey.priority !== b._sortKey.priority) {
         return b._sortKey.priority - a._sortKey.priority;
       }
-      if (a._sortKey.score !== b._sortKey.score) {
-        return b._sortKey.score - a._sortKey.score;
-      }
-      return b._sortKey.sentAt.localeCompare(a._sortKey.sentAt);
+      const aSent = a._sortKey.sentAt;
+      const bSent = b._sortKey.sentAt;
+      if (!aSent && !bSent) return 0;
+      if (!aSent) return 1;
+      if (!bSent) return -1;
+      return bSent.localeCompare(aSent);
     })
     .map(({ _sortKey: _s, _ok: _o, ...rest }) => {
       void _s;
@@ -377,7 +380,8 @@ export async function getAdminThreads(): Promise<AdminThread[]> {
   const sb = getClient();
 
   // Threads + classifications + publish state, all in one Postgrest nested
-  // select. order by classification.total_score desc.
+  // select. Final order is by qualifying-message sent_at DESC, applied
+  // client-side after we merge in prw_messages below.
   const { data: threadRows, error: tErr } = await sb
     .from("prw_threads")
     .select(
@@ -389,8 +393,7 @@ export async function getAdminThreads(): Promise<AdminThread[]> {
       classification:prw_classifications(total_score, is_high_quality, cleaned_reply_text, prompt_version),
       publish_state:prw_publish_state(is_published, display_priority)
       `,
-    )
-    .order("ingested_at", { ascending: false });
+    );
   if (tErr) throw new Error(`getAdminThreads threads: ${tErr.message}`);
 
   // Postgrest 1:1 (FK to PK) → single object; 1:N → array.
@@ -467,34 +470,49 @@ export async function getAdminThreads(): Promise<AdminThread[]> {
     hlsByThread.get(h.thread_id)!.push({ id: h.id, text: h.text, source: h.source });
   }
 
-  return rows.map((r) => {
-    const fullName = [r.lead_first_name, r.lead_last_name]
-      .filter(Boolean)
-      .join(" ")
-      .trim();
-    // Pick the latest classification (highest prompt_version).
-    const classifs = r.classification ?? [];
-    const latest = classifs.length > 0
-      ? [...classifs].sort((a, b) => b.prompt_version.localeCompare(a.prompt_version))[0]
-      : null;
-    const ps = r.publish_state ?? null; // single object via 1:1 FK
-    const msg = msgByThread.get(r.id);
-    return {
-      thread_id: r.id,
-      from_email: r.lead_email,
-      from_display_name: fullName.length > 0 ? fullName : null,
-      to_email: msg?.to_email ?? null,
-      subject: msg?.subject ?? null,
-      body: latest?.cleaned_reply_text ?? "",
-      received_at: msg?.sent_at ?? null,
-      total_score: latest?.total_score ?? 0,
-      is_high_quality: latest?.is_high_quality ?? false,
-      is_published: ps?.is_published ?? false,
-      display_priority: ps?.display_priority ?? 0,
-      redactions: redsByThread.get(r.id) ?? [],
-      highlights: hlsByThread.get(r.id) ?? [],
-    };
-  });
+  return rows
+    .map((r) => {
+      const fullName = [r.lead_first_name, r.lead_last_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim();
+      // Pick the latest classification (highest prompt_version).
+      const classifs = r.classification ?? [];
+      const latest = classifs.length > 0
+        ? [...classifs].sort((a, b) => b.prompt_version.localeCompare(a.prompt_version))[0]
+        : null;
+      const ps = r.publish_state ?? null; // single object via 1:1 FK
+      const msg = msgByThread.get(r.id);
+      return {
+        thread_id: r.id,
+        from_email: r.lead_email,
+        from_display_name: fullName.length > 0 ? fullName : null,
+        to_email: msg?.to_email ?? null,
+        subject: msg?.subject ?? null,
+        body: latest?.cleaned_reply_text ?? "",
+        received_at: msg?.sent_at ?? null,
+        total_score: latest?.total_score ?? 0,
+        is_high_quality: latest?.is_high_quality ?? false,
+        is_published: ps?.is_published ?? false,
+        display_priority: ps?.display_priority ?? 0,
+        redactions: redsByThread.get(r.id) ?? [],
+        highlights: hlsByThread.get(r.id) ?? [],
+      };
+    })
+    .sort((a, b) => {
+      // display_priority DESC first (pin-to-top), then received_at DESC so
+      // the admin list mirrors the public wall ordering — pinned threads at
+      // the top, everything else newest-first.
+      if (a.display_priority !== b.display_priority) {
+        return b.display_priority - a.display_priority;
+      }
+      const aT = a.received_at ?? "";
+      const bT = b.received_at ?? "";
+      if (!aT && !bT) return 0;
+      if (!aT) return 1;
+      if (!bT) return -1;
+      return bT.localeCompare(aT);
+    });
 }
 
 /** Used by the /coming-soon page (M8) and any future public read of the

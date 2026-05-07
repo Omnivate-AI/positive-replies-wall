@@ -23,6 +23,22 @@ import type { AdminThread } from "@/lib/supabase-public";
 
 type StatusFilter = "all" | "published" | "unpublished" | "high_quality";
 
+/** Compact relative time: "2h", "3d", "2w", "5mo", "1y". Used in the list
+ * row metadata so the admin can see at-a-glance how fresh a reply is. */
+function timeSince(iso: string | null): string {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const s = Math.max(0, (Date.now() - then) / 1000);
+  if (s < 60) return `${Math.floor(s)}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  if (s < 604800) return `${Math.floor(s / 86400)}d`;
+  if (s < 2592000) return `${Math.floor(s / 604800)}w`;
+  if (s < 31536000) return `${Math.floor(s / 2592000)}mo`;
+  return `${Math.floor(s / 31536000)}y`;
+}
+
 interface Props {
   initialThreads: AdminThread[];
   adminEmail: string;
@@ -346,7 +362,7 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
     <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[30%_1fr]">
       {/* Left pane: thread list */}
       <aside className="flex max-h-screen flex-col border-r border-border bg-bg-subtle">
-        <header className="space-y-3 border-b border-border bg-surface p-5">
+        <header className="sticky top-0 z-10 space-y-3 border-b border-border bg-surface/95 p-5 backdrop-blur">
           <div className="flex items-center justify-between gap-2">
             <Link
               href="/"
@@ -362,7 +378,7 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
                 className="h-7 w-7 shrink-0 rounded-full"
               />
               <div className="min-w-0">
-                <p className="truncate text-[11px] font-medium uppercase tracking-wider text-accent">
+                <p className="truncate text-xs font-medium uppercase tracking-wider text-accent">
                   Admin
                 </p>
                 <h1 className="truncate text-sm font-semibold tracking-tight text-fg">
@@ -371,25 +387,20 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
               </div>
             </Link>
           </div>
-          {/* Debug counts — surface what getAdminThreads actually returned
-           * so we can spot drift between client state and DB at a glance. */}
-          <div className="grid grid-cols-4 gap-1 rounded-button border border-border bg-bg-subtle p-2 text-center">
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-fg-subtle">Total</p>
-              <p className="text-sm font-semibold tabular-nums text-fg">{counts.total}</p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-fg-subtle">HQ</p>
-              <p className="text-sm font-semibold tabular-nums text-success">{counts.hq}</p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-fg-subtle">Live</p>
-              <p className="text-sm font-semibold tabular-nums text-accent">{counts.published}</p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-fg-subtle">Off</p>
-              <p className="text-sm font-semibold tabular-nums text-fg-muted">{counts.unpublished}</p>
-            </div>
+          {/* Status line — collapsed from a debug grid into a single row of
+           * compact metadata so it reads as a status bar, not a dashboard. */}
+          <div className="flex items-center gap-3 text-xs text-fg-subtle">
+            <span>
+              <span className="font-semibold tabular-nums text-fg">{counts.total}</span> total
+            </span>
+            <span aria-hidden className="text-border">·</span>
+            <span>
+              <span className="font-semibold tabular-nums text-success">{counts.hq}</span> HQ
+            </span>
+            <span aria-hidden className="text-border">·</span>
+            <span>
+              <span className="font-semibold tabular-nums text-accent">{counts.published}</span> live
+            </span>
           </div>
           <input
             type="search"
@@ -420,9 +431,9 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
               </button>
             ))}
           </div>
-          <p className="text-[11px] text-fg-subtle">
-            Signed in as {adminEmail}
-          </p>
+          {adminEmail && adminEmail !== "open-access" && (
+            <p className="text-xs text-fg-subtle">Signed in as {adminEmail}</p>
+          )}
         </header>
 
         <div className="flex-1 overflow-y-auto">
@@ -431,29 +442,49 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
               No threads match.
             </div>
           ) : (
-            <ul className="divide-y divide-border">
+            <ul className="space-y-px p-2">
               {filtered.map((t) => {
                 const isSelected = t.thread_id === selectedId;
+                const scoreClass =
+                  t.total_score >= 7
+                    ? "bg-success-soft text-success"
+                    : t.total_score >= 4
+                      ? "bg-accent-soft text-accent"
+                      : "bg-bg-subtle text-fg-subtle";
+                const age = timeSince(t.received_at);
                 return (
                   <li key={t.thread_id}>
                     <button
                       onClick={() => setSelectedId(t.thread_id)}
-                      className={`w-full px-5 py-3 text-left transition-colors ${
-                        isSelected ? "bg-accent-soft" : "hover:bg-surface"
+                      className={`relative w-full rounded-button border px-4 py-3 text-left transition-all ${
+                        isSelected
+                          ? "border-accent/30 bg-accent-soft shadow-button"
+                          : "border-transparent hover:border-border hover:bg-surface"
                       }`}
                     >
+                      {isSelected && (
+                        <span
+                          aria-hidden
+                          className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-accent"
+                        />
+                      )}
                       <div className="flex items-center justify-between gap-2">
                         <span className="truncate text-sm font-medium text-fg">
                           {t.from_display_name ?? t.from_email}
                         </span>
-                        <span className="shrink-0 font-mono text-[11px] text-fg-subtle tabular-nums">
+                        <span
+                          className={`shrink-0 rounded-pill px-1.5 py-0.5 text-xs font-semibold tabular-nums ${scoreClass}`}
+                        >
                           {t.total_score}
                         </span>
                       </div>
-                      <p className="mt-0.5 truncate text-xs text-fg-muted">
+                      <p className="mt-1 truncate text-[13px] leading-snug text-fg-muted">
                         {t.subject ?? "(no subject)"}
                       </p>
-                      <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
+                      <div className="mt-1.5 flex items-center gap-1.5 text-xs">
+                        {age && (
+                          <span className="text-fg-subtle tabular-nums">{age}</span>
+                        )}
                         {t.is_high_quality && (
                           <span className="rounded-pill bg-success-soft px-1.5 py-px text-success">
                             HQ
@@ -527,7 +558,7 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
             transform: "translateX(-50%)",
             zIndex: 50,
           }}
-          className="flex items-center gap-1 rounded-button border border-border bg-surface p-1 shadow-card-hover"
+          className="flex items-center gap-0.5 rounded-button border border-border bg-surface p-1 shadow-card-hover ring-1 ring-black/5"
         >
           <button
             type="button"
@@ -535,12 +566,9 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
               startTransition(() => addHighlight(pendingSel.threadId, pendingSel.text));
               clearSelection();
             }}
-            className="inline-flex items-center gap-1.5 rounded-button px-2.5 py-1.5 text-xs font-medium text-fg transition-colors hover:bg-purple-50"
+            className="inline-flex items-center gap-1.5 rounded-button bg-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover"
           >
-            <span
-              aria-hidden="true"
-              className="h-2 w-2 rounded-sm bg-purple-200"
-            />
+            <HighlightIcon />
             Highlight
           </button>
           <button
@@ -549,9 +577,9 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
               startTransition(() => addRedaction(pendingSel.threadId, pendingSel.text));
               clearSelection();
             }}
-            className="inline-flex items-center gap-1.5 rounded-button px-2.5 py-1.5 text-xs font-medium text-fg transition-colors hover:bg-bg-subtle"
+            className="inline-flex items-center gap-1.5 rounded-button px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:bg-bg-subtle hover:text-fg"
           >
-            <span aria-hidden="true" className="h-2 w-2 rounded-sm bg-fg" />
+            <RedactIcon />
             Redact
           </button>
         </div>
@@ -629,12 +657,15 @@ function ThreadEditor({
         </div>
         <button
           onClick={onTogglePublished}
-          className={`rounded-button px-3.5 py-1.5 text-xs font-medium transition-colors ${
+          className={`inline-flex items-center gap-1.5 rounded-button px-4 py-2 text-xs font-medium transition-all ${
             thread.is_published
-              ? "border border-border bg-bg-subtle text-fg-muted hover:bg-border"
+              ? "border border-success/30 bg-success-soft text-success hover:bg-success/10"
               : "bg-accent text-white shadow-button hover:bg-accent-hover"
           }`}
         >
+          {thread.is_published && (
+            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-success" />
+          )}
           {thread.is_published ? "Unpublish" : "Publish"}
         </button>
       </header>
@@ -661,7 +692,7 @@ function ThreadEditor({
               density="compact"
             />
           </div>
-          <p className="text-[11px] text-fg-subtle">
+          <p className="text-xs text-fg-subtle">
             Tip: select text above and choose <strong>Highlight</strong> or{" "}
             <strong>Redact</strong>.
           </p>
@@ -691,7 +722,7 @@ function ThreadEditor({
                 Save
               </button>
             </div>
-            <p className="text-[11px] text-fg-subtle">
+            <p className="text-xs text-fg-subtle">
               Higher = more prominent. 0 = default sort.
             </p>
           </section>
@@ -702,12 +733,15 @@ function ThreadEditor({
            * auto_classifier entries are immutable. Add a new highlight
            * via the typed input below or by selecting text in the
            * preview pane and clicking "Highlight" in the floating toolbar. */}
-          <section className="space-y-2">
+          <section className="space-y-2 rounded-card border border-border bg-surface p-4">
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium uppercase tracking-wider text-fg-muted">
                 Highlights
+                <span className="ml-1.5 normal-case text-fg-subtle">
+                  ({thread.highlights.length})
+                </span>
               </label>
-              <span className="rounded-pill bg-purple-50 px-1.5 py-px text-[10px] font-medium text-purple-700">
+              <span className="rounded-pill bg-purple-50 px-1.5 py-px text-xs font-medium text-purple-700">
                 Wall
               </span>
             </div>
@@ -720,21 +754,21 @@ function ThreadEditor({
                 thread.highlights.map((h) => (
                   <li
                     key={h.id}
-                    className="flex items-start justify-between gap-2 rounded-button border border-border bg-surface px-2.5 py-1.5"
+                    className="group flex items-start justify-between gap-2 rounded-button border border-border bg-bg-subtle px-2.5 py-1.5"
                   >
                     <div className="min-w-0">
                       <span className="block text-xs leading-relaxed text-fg">
                         {h.text}
                       </span>
-                      <span className="text-[10px] text-fg-subtle">{h.source}</span>
+                      <span className="text-xs text-fg-subtle">{h.source}</span>
                     </div>
                     {h.source === "admin" && (
                       <button
                         onClick={() => onRemoveHighlight(h.id)}
-                        className="shrink-0 text-xs text-fg-muted transition-colors hover:text-danger"
+                        className="shrink-0 rounded p-1 text-fg-subtle opacity-0 transition-all hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
                         aria-label="Remove highlight"
                       >
-                        ✕
+                        <CloseIcon />
                       </button>
                     )}
                   </li>
@@ -768,9 +802,12 @@ function ThreadEditor({
           </section>
 
           {/* Redactions */}
-          <section className="space-y-2">
+          <section className="space-y-2 rounded-card border border-border bg-surface p-4">
             <label className="text-xs font-medium uppercase tracking-wider text-fg-muted">
               Redactions
+              <span className="ml-1.5 normal-case text-fg-subtle">
+                ({thread.redactions.length})
+              </span>
             </label>
             <ul className="space-y-1">
               {thread.redactions.length === 0 ? (
@@ -779,18 +816,19 @@ function ThreadEditor({
                 thread.redactions.map((r) => (
                   <li
                     key={r.id}
-                    className="flex items-center justify-between gap-2 rounded-button border border-border bg-surface px-2.5 py-1.5"
+                    className="group flex items-center justify-between gap-2 rounded-button border border-border bg-bg-subtle px-2.5 py-1.5"
                   >
                     <div className="min-w-0">
                       <span className="block truncate text-xs text-fg">{r.text}</span>
-                      <span className="text-[10px] text-fg-subtle">{r.source}</span>
+                      <span className="text-xs text-fg-subtle">{r.source}</span>
                     </div>
                     {r.source === "admin" && (
                       <button
                         onClick={() => onRemoveRedaction(r.id)}
-                        className="shrink-0 text-xs text-fg-muted transition-colors hover:text-danger"
+                        aria-label="Remove redaction"
+                        className="shrink-0 rounded p-1 text-fg-subtle opacity-0 transition-all hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
                       >
-                        ✕
+                        <CloseIcon />
                       </button>
                     )}
                   </li>
@@ -822,12 +860,59 @@ function ThreadEditor({
             </form>
           </section>
 
-          <p className="text-[11px] leading-relaxed text-fg-subtle">
+          <p className="text-xs leading-relaxed text-fg-subtle">
             Auto-detected redactions (lead/SDR/classifier) are immutable in
             this UI — they regenerate from each new ingest + classify run.
           </p>
         </aside>
       </div>
     </>
+  );
+}
+
+function HighlightIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M11 2l3 3-7 7-3.5.5L4 9l7-7z" />
+      <path d="M2 14h12" />
+    </svg>
+  );
+}
+
+function RedactIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5"
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <rect x="2" y="6" width="12" height="4" rx="1" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      className="h-3 w-3"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M4 4l8 8M12 4l-8 8" />
+    </svg>
   );
 }

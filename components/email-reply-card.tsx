@@ -178,8 +178,8 @@ export function EmailReplyCard({
   return (
     <article
       className={clsx(
-        "rounded-card border border-border bg-surface shadow-card",
-        "transition-shadow hover:shadow-card-hover",
+        "rounded-card bg-surface shadow-lg",
+        "transition-shadow hover:shadow-xl",
         padding,
         className,
       )}
