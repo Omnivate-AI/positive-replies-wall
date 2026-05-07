@@ -61,6 +61,14 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
   const [pendingSel, setPendingSel] = useState<PendingSelection | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const [, startTransition] = useTransition();
+  // `timeSince()` uses Date.now(), which differs between SSR snapshot and
+  // client hydration. For sub-minute ages the strings don't match and we
+  // throw React error #418. Gate the relative-time render until after
+  // mount so server emits an empty placeholder and the client fills it in.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Dismiss the floating toolbar when the user clicks anywhere that isn't
   // the toolbar itself or the preview body. Clicking inside the preview
@@ -451,7 +459,7 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
                     : t.total_score >= 4
                       ? "bg-accent-soft text-accent"
                       : "bg-bg-subtle text-fg-subtle";
-                const age = timeSince(t.received_at);
+                const age = mounted ? timeSince(t.received_at) : "";
                 return (
                   <li key={t.thread_id}>
                     <button
