@@ -14,7 +14,14 @@
  * error and rolls back.
  */
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import Link from "next/link";
 import { EmailReplyCard } from "@/components/email-reply-card";
 import { buildExcerpt, pickAnchorHighlight } from "@/lib/excerpt";
@@ -63,12 +70,16 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
   const [, startTransition] = useTransition();
   // `timeSince()` uses Date.now(), which differs between SSR snapshot and
   // client hydration. For sub-minute ages the strings don't match and we
-  // throw React error #418. Gate the relative-time render until after
-  // mount so server emits an empty placeholder and the client fills it in.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  // throw React error #418. Gate the relative-time render on whether we're
+  // on the server or client so the server emits an empty placeholder and
+  // the client fills it in. useSyncExternalStore is the React-canonical
+  // way to express this without setState-in-effect (which the new
+  // react-hooks/set-state-in-effect rule rightly flags as cascading-render).
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 
   // Dismiss the floating toolbar when the user clicks anywhere that isn't
   // the toolbar itself or the preview body. Clicking inside the preview
@@ -390,9 +401,6 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
                 <p className="truncate text-xs font-medium uppercase tracking-wider text-accent">
                   Admin
                 </p>
-                <h1 className="truncate text-sm font-semibold tracking-tight text-fg">
-                  Positive Replies
-                </h1>
               </div>
             </Link>
           </div>
