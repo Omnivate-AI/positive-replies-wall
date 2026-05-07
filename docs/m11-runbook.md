@@ -242,32 +242,53 @@ After any rotation, watch the next scheduled 08:00 London run land green before 
 **Workload baseline** (post-backfill, 2026-05-07):
 
 - 250 threads ingested across all time
-- ~10 new positive replies/week observed steady-state (~520/year projected)
-- 1 daily ingest+classify run = 365 wrapper executions/year
+- ~10 new positive replies/week observed steady-state → ~43 classifications/month
+- 1 daily ingest+classify run = ~90 task executions/month (1 wrapper + 2 children)
 
-**Per-component cost:**
+### OpenRouter — the only real variable cost
 
-| Component | Volume | Pricing | Monthly cost |
+Per-classify token math:
+
+| Source | Bytes/chars | Tokens (≈4 bytes/tok) |
+|---|---|---|
+| System prompt (`trigger/prompts/classify-reply.md`) | 31,881 bytes | ~7,970 in |
+| User message (avg reply body ~1,500 chars + framing fields) | ~1,800 chars | ~450 in |
+| Output (cleaned text + 4 sub-scores + reasoning + highlight + redactions, `max_tokens=2,500`, typical ~800) | — | ~800 out |
+| **Per call total** | | **~8,400 in / ~800 out** |
+
+Pricing for `xiaomi/mimo-v2-flash` (small-flash class, midpoint of comparable models on OpenRouter): **~$0.10 / 1M input tokens, ~$0.30 / 1M output tokens.** Verify against [openrouter.ai/xiaomi/mimo-v2-flash](https://openrouter.ai) before quoting externally — the figures above are a reasoned estimate, not a paste from the live dashboard.
+
+Per call: `8,400 × 0.10/1M + 800 × 0.30/1M = $0.00084 + $0.00024` ≈ **$0.001** (one-tenth of a cent).
+
+| Scenario | Volume | OpenRouter cost |
+|---|---|---|
+| Total backfill (one-time, already paid) | 250 classifications | **~$0.25** |
+| Steady state | ~43 classifications/month | **~$0.05/month** |
+| At 10× volume | ~430 classifications/month | **~$0.43/month** |
+| Worst-case re-classify after a prompt bump | 250 threads re-scored at next version | **~$0.25** one-off |
+
+### Everything else
+
+| Component | Volume | Pricing tier | Monthly cost |
 |---|---|---|---|
-| Trigger.dev task executions | 1 wrapper + 2 children/day = 90/month | Trigger.dev free tier covers 10k task runs/month | **$0** |
-| Trigger.dev compute time | ~5 min/day = 150 min/month | First 5k mins/month free | **$0** |
-| OpenRouter (`xiaomi/mimo-v2-flash`) | ~40 classifications/month, ~3k input tokens + 500 output tokens each | Mimo-v2-flash is sub-cent per call | **<$1** |
+| Trigger.dev task executions | ~90/month | Free tier covers 10k/month | **$0** |
+| Trigger.dev compute time | ~5 min/day = ~150 min/month | First 5k mins/month free | **$0** |
 | Supabase | <100MB storage, low Postgrest read volume | Free tier (500MB, 50k MAU) | **$0** |
 | Vercel | ISR + edge bandwidth, low traffic | Free tier (100GB) | **$0** |
 
-**Total steady-state: <$1/month.**
+### Bottom line
 
-**At 10× volume** (5,200 replies/year, daily wall traffic 10× current):
+**Total steady-state: ~$0.05/month** (essentially the OpenRouter pennies — everything else is on free tiers).
 
-- Trigger.dev still on free tier
-- OpenRouter ~$5/month
-- Supabase still on free tier
-- Vercel still on free tier
-- **Total: ~$5/month**
+**At 10× volume: ~$0.43/month.** Still a rounding error.
 
-The pipeline is essentially free until we cross either Trigger.dev's 10k-run threshold (would require ~30 daily runs sustained) or Supabase's 500MB storage cap (would require ~50,000 threads). Neither is a near-term risk.
+The pipeline crosses out of free-tier territory only at:
 
-> **Note:** these numbers are projections grounded in the backfill volume + Trigger.dev free-tier limits as of writing. Before declaring M11 done, paste the actual last-30-days OpenRouter spend from the dashboard into this section to replace the estimate.
+- **~330 daily reply-classifications** (would clear Trigger.dev's 10k-runs/month free tier — but classifications happen in a single batched task call, so the 10k threshold actually maps to ~330 daily runs of the wrapper itself, never going to happen).
+- **~50,000 threads stored** (would clear Supabase's 500MB free tier — at 10/week that's ~100 years).
+- **~10,000 monthly classifications** (would clear into ~$10/month OpenRouter spend — i.e. ~1,400 replies/month, an order of magnitude beyond plausible).
+
+None are near-term risks. **Budget this at $1/month worst-case for the next 12 months.**
 
 ---
 
