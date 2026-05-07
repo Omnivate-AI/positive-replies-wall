@@ -215,7 +215,14 @@ export function EmailReplyCard({
           </span>
         </div>
         {dateStr && (
-          <div className="hidden shrink-0 text-xs tabular-nums text-fg-subtle sm:block">
+          <div
+            className="hidden shrink-0 text-xs tabular-nums text-fg-subtle sm:block"
+            // toLocaleString without a fixed timeZone formats in the runtime's
+            // local zone — server (UTC) and client (visitor's local) produce
+            // different strings and React throws hydration error #418. The
+            // string is cosmetic; suppress the warning rather than force UTC.
+            suppressHydrationWarning
+          >
             {dateStr}
           </div>
         )}
