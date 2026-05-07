@@ -116,3 +116,43 @@ function fallbackExcerpt(body: string): Excerpt {
     truncated,
   };
 }
+
+/**
+ * Pick the highlight phrase that anchors the excerpt — when a thread has
+ * multiple highlights, we use the EARLIEST one in the body so the wall
+ * card always shows praise above the fold. Other highlights elsewhere in
+ * the rendered text still get the purple wash via the multi-highlight
+ * renderer in `email-reply-card`.
+ *
+ * Resolution order per candidate:
+ *   1. Verbatim substring match
+ *   2. Case-insensitive match
+ * The earliest start index across all matched candidates wins.
+ *
+ * Returns null when no candidate matches — caller falls back to the
+ * body-start excerpt.
+ */
+export function pickAnchorHighlight(
+  body: string,
+  highlights: string[] | null | undefined,
+): string | null {
+  if (!body || !highlights || highlights.length === 0) return null;
+  const lower = body.toLowerCase();
+  let bestIdx = Infinity;
+  let bestPhrase: string | null = null;
+  for (const h of highlights) {
+    if (!h || h.length === 0) continue;
+    const verbatimIdx = body.indexOf(h);
+    if (verbatimIdx !== -1 && verbatimIdx < bestIdx) {
+      bestIdx = verbatimIdx;
+      bestPhrase = h;
+      continue;
+    }
+    const ciIdx = lower.indexOf(h.toLowerCase());
+    if (ciIdx !== -1 && ciIdx < bestIdx) {
+      bestIdx = ciIdx;
+      bestPhrase = h;
+    }
+  }
+  return bestPhrase;
+}

@@ -1,131 +1,158 @@
-import Link from "next/link";
+/**
+ * / — the public wall.
+ *
+ * Pulls only published threads with a non-empty highlight, sorted by
+ * display_priority ASC, total_score DESC, sent_at DESC. Renders each via
+ * EmailReplyCard with the truncated-excerpt body + auto + admin
+ * redactions + SDR allowlist applied.
+ *
+ * Perf: ISR with revalidate=60. Admin actions trigger
+ * /api/admin/revalidate which calls revalidatePath('/') so changes
+ * surface within seconds, not the 60s window.
+ */
 
-export default function HomePage() {
+import Link from "next/link";
+import { EmailReplyCard } from "@/components/email-reply-card";
+import { buildExcerpt, pickAnchorHighlight } from "@/lib/excerpt";
+import { SDR_FIRST_NAMES } from "@/lib/sdr";
+import { getPublishedWallThreads } from "@/lib/supabase-public";
+
+export const revalidate = 60;
+
+const BOOK_CALL_URL = "https://app.usemotion.com/meet/omar-almubarak/jzkldtn";
+
+function truncatedBody(body: string, highlights: string[]): {
+  body: string;
+  highlights: string[];
+} {
+  // Anchor truncation on the earliest highlight that exists in the body.
+  // Other highlights still get the purple wash where they appear in the
+  // visible portion (multi-highlight rendering in EmailReplyCard).
+  const anchor = pickAnchorHighlight(body, highlights);
+  const ex = buildExcerpt(body, anchor);
+  const ellipsis = ex.truncated ? "…" : "";
+  if (ex.highlight) {
+    return {
+      body: `${ex.before}${ex.highlight}${ex.after}${ellipsis}`,
+      highlights,
+    };
+  }
+  return { body: `${ex.after}${ellipsis}`, highlights };
+}
+
+export default async function HomePage() {
+  // Guard against transient Supabase fetch failures so a Node-level
+  // `TypeError: fetch failed` doesn't take the whole page to 500. The
+  // retry loop inside getPublishedWallThreads already handles short
+  // hiccups; this catch handles harder failures (extended outages) by
+  // rendering the empty state.
+  let threads: Awaited<ReturnType<typeof getPublishedWallThreads>> = [];
+  try {
+    threads = await getPublishedWallThreads();
+  } catch (e) {
+    console.error("[/] getPublishedWallThreads failed:", e);
+  }
+
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col justify-center px-6 py-16 sm:px-8">
+    <main className="min-h-screen px-6 py-16 sm:px-8 sm:py-20 lg:px-12">
       <div className="space-y-12">
-        <header className="space-y-3">
-          <p className="text-sm font-medium uppercase tracking-wider text-accent">
-            Positive Replies Wall
-          </p>
-          <h1 className="text-4xl font-semibold tracking-tight text-fg sm:text-5xl">
-            Pick a rendering. Audit the classifier. Preview the wall.
+        <header className="space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <p className="text-sm font-medium uppercase tracking-wider text-accent">
+              Positive Replies
+            </p>
+            <Link
+              href="/admin"
+              className="inline-flex items-center gap-1 rounded-button border border-border bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted shadow-button transition-colors hover:border-border-strong hover:text-fg"
+            >
+              Admin
+              <svg
+                className="h-3.5 w-3.5"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                aria-hidden="true"
+              >
+                <path
+                  d="M5 3l5 5-5 5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </Link>
+          </div>
+          <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-fg sm:text-5xl">
+            Real positive replies from prospects we&rsquo;ve cold-emailed on
+            behalf of our clients.
           </h1>
           <p className="max-w-2xl text-base leading-relaxed text-fg-muted">
-            Three short stops on the way to the public wall. Choose how every
-            reply should display, spot-check the AI&rsquo;s judgment on twenty
-            real replies, and preview the landing page that goes live on
-            omnivate.ai.
+            Names redacted. Praise verbatim.
           </p>
         </header>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Link
-            href="/m7/pocs"
-            className="group rounded-card border border-border bg-surface p-6 shadow-card transition-all hover:-translate-y-0.5 hover:border-border-strong hover:shadow-card-hover"
-          >
-            <div className="mb-3 inline-flex h-9 items-center rounded-pill bg-accent-soft px-3 text-xs font-medium text-accent">
-              Step 1
-            </div>
-            <h2 className="text-lg font-semibold text-fg">
-              Compare renderings
-            </h2>
-            <p className="mt-1 text-sm text-fg-muted">
-              Three sample replies, three approaches: actual screenshots,
-              code-rendered cards, and a hybrid. With a redaction toggle.
+        {threads.length === 0 ? (
+          <div className="rounded-card border border-dashed border-border bg-bg-subtle p-12 text-center">
+            <p className="text-sm text-fg-muted">
+              No replies are published yet. Check back soon.
             </p>
-            <div className="mt-4 inline-flex items-center text-sm font-medium text-accent transition-transform group-hover:translate-x-0.5">
-              Open viewer
-              <svg
-                className="ml-1 h-4 w-4"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  d="M5 3l5 5-5 5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
-          </Link>
+          </div>
+        ) : (
+          <div className="columns-1 gap-5 sm:columns-2 lg:columns-3 xl:columns-4 2xl:columns-5">
+            {threads.map((t) => {
+              const { body, highlights } = truncatedBody(t.body, t.highlights);
+              const allRedactions = (() => {
+                const set = new Set(t.redactions);
+                for (const n of SDR_FIRST_NAMES) set.add(n);
+                // Defense in depth — never rely on prw_redactions alone to
+                // mask the lead's identity or the SDR mailbox.
+                if (t.from_display_name) set.add(t.from_display_name);
+                if (t.from_email) set.add(t.from_email);
+                if (t.to_email) set.add(t.to_email);
+                return Array.from(set);
+              })();
+              return (
+                <div key={t.thread_id} className="mb-5 break-inside-avoid">
+                  <EmailReplyCard
+                    from_email={t.from_email}
+                    from_display_name={t.from_display_name}
+                    to_email={t.to_email}
+                    subject={t.subject}
+                    body={body}
+                    highlights={highlights}
+                    redactions={allRedactions}
+                    received_at={t.received_at}
+                    density="compact"
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
 
-          <Link
-            href="/m7/quiz"
-            className="group rounded-card border border-border bg-surface p-6 shadow-card transition-all hover:-translate-y-0.5 hover:border-border-strong hover:shadow-card-hover"
+        <footer className="flex flex-col items-start gap-4 border-t border-border pt-10 sm:flex-row sm:items-center sm:justify-between">
+          <p className="max-w-md text-sm leading-relaxed text-fg-muted">
+            Want this kind of reply rate from your outbound? Let&rsquo;s talk.
+          </p>
+          <a
+            href={BOOK_CALL_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-button bg-accent px-5 py-2.5 text-sm font-medium text-white shadow-button transition-colors hover:bg-accent-hover"
           >
-            <div className="mb-3 inline-flex h-9 items-center rounded-pill bg-accent-soft px-3 text-xs font-medium text-accent">
-              Step 2
-            </div>
-            <h2 className="text-lg font-semibold text-fg">
-              Take the quiz
-            </h2>
-            <p className="mt-1 text-sm text-fg-muted">
-              Twenty real replies. Mark each &ldquo;Qualified&rdquo; or
-              &ldquo;Not qualified.&rdquo; See your agreement with the AI at the
-              end.
-            </p>
-            <div className="mt-4 inline-flex items-center text-sm font-medium text-accent transition-transform group-hover:translate-x-0.5">
-              Start quiz
-              <svg
-                className="ml-1 h-4 w-4"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  d="M5 3l5 5-5 5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
-          </Link>
-
-          <Link
-            href="/coming-soon"
-            className="group rounded-card border border-border bg-surface p-6 shadow-card transition-all hover:-translate-y-0.5 hover:border-border-strong hover:shadow-card-hover"
-          >
-            <div className="mb-3 inline-flex h-9 items-center gap-2 rounded-pill bg-accent-soft px-3 text-xs font-medium text-accent">
-              <span className="relative inline-flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
-              </span>
-              Live
-            </div>
-            <h2 className="text-lg font-semibold text-fg">
-              Preview the wall
-            </h2>
-            <p className="mt-1 text-sm text-fg-muted">
-              The coming-soon landing page that ships to omnivate.ai. Pulls a
-              live count from Supabase on every refresh.
-            </p>
-            <div className="mt-4 inline-flex items-center text-sm font-medium text-accent transition-transform group-hover:translate-x-0.5">
-              Open preview
-              <svg
-                className="ml-1 h-4 w-4"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  d="M5 3l5 5-5 5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
-          </Link>
-        </div>
-
-        <p className="text-xs text-fg-subtle">
-          M7 / M8 deliverables for the positive-replies-wall project. Cards 1
-          and 2 are hardcoded fixtures; card 3 reads live from Supabase.
-        </p>
+            Book a call
+            <svg
+              className="h-4 w-4"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              aria-hidden="true"
+            >
+              <path d="M5 3l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </a>
+        </footer>
       </div>
     </main>
   );

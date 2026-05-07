@@ -32,10 +32,10 @@ export interface EmailReplyCardProps {
   received_at?: string | null;
   /** Strings to mask with black bars. Empty = no redaction. */
   redactions?: string[];
-  /** Optional verbatim phrase from `body` to wrap in a quiet purple highlight.
-   * When the phrase isn't found in the body, no highlight is drawn (the body
-   * still renders normally). Used by the wall to surface the killer line. */
-  highlight?: string | null;
+  /** Verbatim phrases from `body` to wrap in a quiet purple highlight. The
+   * renderer wraps every occurrence of every phrase. Multiple highlights
+   * per card are first-class — pass `[]` to disable highlighting entirely. */
+  highlights?: string[];
   /** Visual size variant. Default "comfortable". */
   density?: "comfortable" | "compact";
   /** Render only the body (no subject, no sender/recipient rows). For the quiz. */
@@ -56,37 +56,54 @@ function formatReceivedAt(iso?: string | null): string {
   });
 }
 
-/** Render one paragraph with redactions applied AND optionally wrap a verbatim
- * highlight phrase in a quiet purple span. Find pass: verbatim first, then
- * case-insensitive — paragraph-scoped because the highlight is virtually
- * always within a single paragraph in our data. */
+/** Render one paragraph with redactions applied AND wrap every occurrence
+ * of every highlight phrase in a quiet purple span. Longest-first matching
+ * to avoid partial overlaps; case-insensitive so classifier-paraphrased
+ * casing still matches. Redactions still apply *inside* the highlight span
+ * — both visual treatments stack cleanly. */
 function renderParagraph(
   para: string,
   redactions: string[],
-  highlight: string | null | undefined,
+  highlights: string[],
 ): ReactNode {
-  if (!highlight || highlight.length === 0) {
-    return applyRedactions(para, redactions);
+  const valid = highlights.filter((h) => h && h.length > 0);
+  if (valid.length === 0) return applyRedactions(para, redactions);
+
+  const sorted = [...new Set(valid)].sort((a, b) => b.length - a.length);
+  const escaped = sorted.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(`(${escaped.join("|")})`, "gi");
+
+  const out: ReactNode[] = [];
+  let lastIdx = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+  while ((m = re.exec(para)) !== null) {
+    if (m.index > lastIdx) {
+      out.push(
+        <Fragment key={`t${key++}`}>
+          {applyRedactions(para.slice(lastIdx, m.index), redactions)}
+        </Fragment>,
+      );
+    }
+    out.push(
+      <span
+        key={`h${key++}`}
+        className="rounded-sm bg-purple-100 px-0.5 py-px"
+      >
+        {applyRedactions(m[0], redactions)}
+      </span>,
+    );
+    lastIdx = m.index + m[0].length;
+    if (m.index === re.lastIndex) re.lastIndex++;
   }
-  const length = highlight.length;
-  let idx = para.indexOf(highlight);
-  if (idx === -1) {
-    const lowerIdx = para.toLowerCase().indexOf(highlight.toLowerCase());
-    if (lowerIdx === -1) return applyRedactions(para, redactions);
-    idx = lowerIdx;
+  if (lastIdx < para.length) {
+    out.push(
+      <Fragment key={`t${key}`}>
+        {applyRedactions(para.slice(lastIdx), redactions)}
+      </Fragment>,
+    );
   }
-  const before = para.slice(0, idx);
-  const hl = para.slice(idx, idx + length);
-  const after = para.slice(idx + length);
-  return (
-    <Fragment>
-      {before && applyRedactions(before, redactions)}
-      <span className="rounded-sm bg-purple-100 px-0.5 py-px">
-        {applyRedactions(hl, redactions)}
-      </span>
-      {after && applyRedactions(after, redactions)}
-    </Fragment>
-  );
+  return out;
 }
 
 /** Reusable email body — preserves line breaks AND tightens the visual gap
@@ -95,12 +112,12 @@ function renderParagraph(
 export function ReplyBody({
   body,
   redactions = [],
-  highlight,
+  highlights = [],
   className,
 }: {
   body: string;
   redactions?: string[];
-  highlight?: string | null;
+  highlights?: string[];
   className?: string;
 }) {
   const paragraphs = body.split(/\n{2,}/);
@@ -116,7 +133,7 @@ export function ReplyBody({
           key={i}
           className={clsx("whitespace-pre-wrap", i > 0 && "mt-3")}
         >
-          {renderParagraph(para, redactions, highlight)}
+          {renderParagraph(para, redactions, highlights)}
         </p>
       ))}
     </div>
@@ -135,7 +152,7 @@ export function EmailReplyCard({
   body,
   received_at,
   redactions = [],
-  highlight,
+  highlights = [],
   density = "comfortable",
   bodyOnly = false,
   className,
@@ -153,7 +170,7 @@ export function EmailReplyCard({
         )}
         aria-label="Reply body"
       >
-        <ReplyBody body={body} redactions={redactions} highlight={highlight} />
+        <ReplyBody body={body} redactions={redactions} highlights={highlights} />
       </article>
     );
   }
@@ -217,7 +234,7 @@ export function EmailReplyCard({
 
       {/* Body */}
       <div className="mt-5">
-        <ReplyBody body={body} redactions={redactions} highlight={highlight} />
+        <ReplyBody body={body} redactions={redactions} highlights={highlights} />
       </div>
     </article>
   );

@@ -56,7 +56,6 @@ interface PendingThread {
   lead_first_name: string | null;
   lead_last_name: string | null;
   company_name: string | null;
-  has_admin_highlight: boolean;
 }
 
 async function fetchPendingThreads(
@@ -79,7 +78,7 @@ async function fetchPendingThreads(
   let q = sb
     .from("prw_threads")
     .select(
-      `id, lead_first_name, lead_last_name, company_name, highlight_text,
+      `id, lead_first_name, lead_last_name, company_name,
        prw_messages!inner(subject, body_html, from_email, is_qualifying_reply)`,
     )
     .eq("prw_messages.is_qualifying_reply", true)
@@ -95,7 +94,6 @@ async function fetchPendingThreads(
     lead_first_name: string | null;
     lead_last_name: string | null;
     company_name: string | null;
-    highlight_text: string | null;
     prw_messages: {
       subject: string | null;
       body_html: string;
@@ -116,7 +114,6 @@ async function fetchPendingThreads(
         lead_first_name: r.lead_first_name,
         lead_last_name: r.lead_last_name,
         company_name: r.company_name,
-        has_admin_highlight: !!(r.highlight_text && r.highlight_text.trim().length > 0),
       };
     })
     .filter((r) => r.reply_body_html); // skip if qualifying message somehow missing
@@ -154,19 +151,25 @@ async function writeClassification(
     { isRetryable: isTransientFetchError },
   );
 
-  // 2. Copy highlight onto the thread when admin hasn't set one. Skip empty
-  //    highlights (rejection cases) — leaving highlight_text null.
+  // 2. Seed auto_classifier highlight in prw_highlights. Idempotent on
+  //    (thread_id, text). Skip empty highlights (rejection cases). The old
+  //    "copy onto prw_threads.highlight_text only if admin hasn't set one"
+  //    coupling is gone — the admin layer now lives in prw_highlights with
+  //    source='admin' rows, separate from auto_classifier rows.
   let highlightApplied = false;
   if (
-    !thread.has_admin_highlight &&
     result.suggested_highlight_text &&
     result.suggested_highlight_text.trim().length > 0
   ) {
-    const upd = await sb
-      .from("prw_threads")
-      .update({ highlight_text: result.suggested_highlight_text })
-      .eq("id", thread.thread_id);
-    if (!upd.error) highlightApplied = true;
+    const ins = await sb.from("prw_highlights").upsert(
+      {
+        thread_id: thread.thread_id,
+        text: result.suggested_highlight_text.trim(),
+        source: "auto_classifier",
+      },
+      { onConflict: "thread_id,text", ignoreDuplicates: true },
+    );
+    if (!ins.error) highlightApplied = true;
   }
 
   // 3. Seed auto_classifier redactions. Idempotent on (thread_id, text, match_type).

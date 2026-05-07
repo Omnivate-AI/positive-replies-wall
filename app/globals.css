@@ -84,6 +84,22 @@ button {
   font-family: inherit;
 }
 
+/* Pointer cursor on every clickable element. Tailwind's preflight resets the
+ * default cursor to `default`; this brings back the OS pointer for buttons,
+ * role=button elements, and links. Inputs are intentionally excluded. */
+button:not(:disabled),
+[role="button"]:not(:disabled),
+a[href],
+summary,
+label[for] {
+  cursor: pointer;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
 button:focus-visible,
 [role="button"]:focus-visible,
 a:focus-visible {
