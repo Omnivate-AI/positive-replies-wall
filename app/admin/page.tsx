@@ -14,6 +14,7 @@
 import type { Metadata } from "next";
 import { getAdminThreads } from "@/lib/supabase-public";
 import { AdminDashboard } from "./dashboard";
+import { AdminQueryProvider } from "./_providers/query-provider";
 
 export const dynamic = "force-dynamic";
 
@@ -24,5 +25,9 @@ export const metadata: Metadata = {
 
 export default async function AdminPage() {
   const threads = await getAdminThreads();
-  return <AdminDashboard initialThreads={threads} adminEmail="open-access" />;
+  return (
+    <AdminQueryProvider>
+      <AdminDashboard initialThreads={threads} adminEmail="open-access" />
+    </AdminQueryProvider>
+  );
 }

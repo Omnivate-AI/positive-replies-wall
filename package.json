@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.95.2",
+    "@tanstack/react-query": "^5.100.9",
     "@trigger.dev/sdk": "4.4.5",
     "@types/ws": "^8.18.1",
     "clsx": "^2.1.1",

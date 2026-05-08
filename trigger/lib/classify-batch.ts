@@ -215,48 +215,97 @@ export async function runClassifyBatch(
   log(`Pending classifications at ${PROMPT_VERSION}: ${pending.length}`);
   if (pending.length === 0) return stats;
 
-  let cursor = 0;
-  const inflight = new Set<Promise<void>>();
+  // Run threads in parallel with bounded concurrency. Each task either
+  // returns a successful result or an Error to record — the loop never
+  // throws, so a single bad thread doesn't sink the run.
+  type ItemResult =
+    | { ok: true; thread: PendingThread; result: ClassifyResult; highlightApplied: boolean; redactionsSeeded: number }
+    | { ok: false; thread: PendingThread; error: string };
 
-  const launch = (thread: PendingThread): Promise<void> => {
-    const input: ClassifyInput = {
-      reply_subject: thread.reply_subject,
-      reply_body: thread.reply_body_html,
-      reply_from_email: thread.reply_from_email,
-      lead_first_name: thread.lead_first_name,
-      lead_last_name: thread.lead_last_name,
-      lead_company_name: thread.company_name,
-    };
-    const p = (async () => {
+  const results = await pMap<PendingThread, ItemResult>(
+    pending,
+    async (thread) => {
+      const input: ClassifyInput = {
+        reply_subject: thread.reply_subject,
+        reply_body: thread.reply_body_html,
+        reply_from_email: thread.reply_from_email,
+        lead_first_name: thread.lead_first_name,
+        lead_last_name: thread.lead_last_name,
+        lead_company_name: thread.company_name,
+      };
       try {
         const result = await classifyReply(input);
         const writeStats = await writeClassification(thread, result);
-        stats.threadsClassified++;
-        if (result.is_high_quality) stats.threadsHighQuality++;
-        if (writeStats.highlightApplied) stats.highlightsApplied++;
-        stats.redactionsSeeded += writeStats.redactionsSeeded;
-        if (stats.threadsClassified % 25 === 0) {
-          log(`  classified ${stats.threadsClassified}/${pending.length}`);
-        }
+        return {
+          ok: true,
+          thread,
+          result,
+          highlightApplied: writeStats.highlightApplied,
+          redactionsSeeded: writeStats.redactionsSeeded,
+        };
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        stats.errors.push(`thread ${thread.thread_id}: ${msg}`);
+        return {
+          ok: false,
+          thread,
+          error: e instanceof Error ? e.message : String(e),
+        };
       }
-    })();
-    inflight.add(p);
-    p.finally(() => inflight.delete(p));
-    return p;
-  };
+    },
+    concurrency,
+    (completed) => {
+      if (completed % 25 === 0) {
+        log(`  classified ${completed}/${pending.length}`);
+      }
+    },
+  );
 
-  while (cursor < pending.length || inflight.size > 0) {
-    while (inflight.size < concurrency && cursor < pending.length) {
-      launch(pending[cursor++]);
+  // Aggregate results in order. Stats math is straight-line — no shared
+  // mutable state across concurrent tasks, so race conditions in the
+  // counters are structurally impossible.
+  for (const r of results) {
+    if (!r.ok) {
+      stats.errors.push(`thread ${r.thread.thread_id}: ${r.error}`);
+      continue;
     }
-    if (inflight.size > 0) await Promise.race(inflight);
+    stats.threadsClassified++;
+    if (r.result.is_high_quality) stats.threadsHighQuality++;
+    if (r.highlightApplied) stats.highlightsApplied++;
+    stats.redactionsSeeded += r.redactionsSeeded;
   }
 
   log(
     `Done: ${stats.threadsClassified}/${pending.length} classified, ${stats.threadsHighQuality} high-quality, ${stats.highlightsApplied} highlights applied, ${stats.redactionsSeeded} auto_classifier redactions seeded, ${stats.errors.length} errors`,
   );
   return stats;
+}
+
+/** Parallel map with bounded concurrency. Workers pick the next item off
+ * a shared cursor; results are slotted by index so output order matches
+ * input order. Each item's `fn` is fully awaited inside its worker, so
+ * there are no floating promises and any synchronous error inside `fn`
+ * propagates as a rejection of the outer `await Promise.all(workers)`. */
+async function pMap<T, R>(
+  items: T[],
+  fn: (item: T) => Promise<R>,
+  concurrency: number,
+  onComplete?: (completed: number) => void,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  let completed = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i]);
+      completed++;
+      onComplete?.(completed);
+    }
+  };
+  const workers = Array.from(
+    { length: Math.min(Math.max(1, concurrency), items.length) },
+    worker,
+  );
+  await Promise.all(workers);
+  return results;
 }

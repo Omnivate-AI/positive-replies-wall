@@ -2,8 +2,10 @@
 
 **Severity:** Low
 **Priority:** P3
-**Status:** Open
+**Status:** Closed
 **Area:** `trigger/lib/classify-batch.ts`
+
+**Resolution:** Replaced the in-flight Set + `Promise.race` loop with an explicit `pMap<T, R>(items, fn, concurrency, onComplete?)` helper. Each item runs inside a worker that fully `await`s `fn(item)` and slots the result by index — no floating promises, no `.finally()` cleanup, no `inflight.delete` race. Each item returns either `{ ok: true, ... }` or `{ ok: false, error }` so a single bad thread never sinks the run; the outer aggregation loop accumulates stats from the result array as straight-line code. The structural fragility (interleaved counter increments under partial failures) is gone — counter math is sequential post-pMap. Existing e2e tests (`tests/e2e/classify-end-to-end.test.ts`) pass without modification, confirming behavior parity. With ESLint scope expanded in Batch 1, the file is now linted; no `no-floating-promises` violations.
 
 **Problem**
 The concurrency loop in `runClassifyBatch` (`trigger/lib/classify-batch.ts:218-256`) launches each thread's classify+write task into an in-flight Set, then `Promise.race`s on the set to wait for slot availability:
