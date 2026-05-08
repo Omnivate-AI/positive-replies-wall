@@ -11,6 +11,7 @@
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import ws from "ws";
 import { PROMPT_VERSION } from "@/trigger/lib/classify";
 import { SDR_FIRST_NAMES } from "./sdr";
 
@@ -19,6 +20,28 @@ import { SDR_FIRST_NAMES } from "./sdr";
  * we ever cross this threshold the team should switch to server-side cursor
  * pagination (see ticket #008). */
 const PUBLISHED_WALL_HARD_CAP = 500;
+
+/** Supabase / Postgrest enforces a server-side `db-max-rows: 1000` cap that
+ * client-side `.limit()` and `.range()` cannot override. To fetch every
+ * row associated with a large IN-list (e.g. all redactions across 250+
+ * threads), batch the IN-clause into chunks small enough that each chunk
+ * stays under the cap, then concatenate the results. */
+const IN_BATCH_SIZE = 200;
+
+async function fetchInBatches<T>(
+  ids: number[],
+  fetcher: (batch: number[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  label: string,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += IN_BATCH_SIZE) {
+    const batch = ids.slice(i, i + IN_BATCH_SIZE);
+    const { data, error } = await fetcher(batch);
+    if (error) throw new Error(`${label}: ${error.message}`);
+    if (data) out.push(...data);
+  }
+  return out;
+}
 
 let _client: SupabaseClient | null = null;
 
@@ -30,6 +53,12 @@ function getClient(): SupabaseClient {
   if (!key) throw new Error("SUPABASE_ANON_KEY is not set");
   _client = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
+    // Node 20 lacks a native WebSocket. supabase-js's Realtime client throws
+    // at construction without one (matters only in vitest / non-Vercel
+    // runtimes — Next.js's edge/node runtimes provide WebSocket). The
+    // `ws` polyfill is already a dep for the Trigger.dev path.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    realtime: { transport: ws as unknown as any },
   });
   return _client;
 }
@@ -181,26 +210,34 @@ export async function getWallThreads(limit = 10): Promise<WallThread[]> {
 
   // 4. Redactions + highlights for these threads. Project match_type so
   // the renderer routes literal vs word_boundary per row (ticket #013).
-  const [redResp, hlResp] = await Promise.all([
-    sb
-      .from("prw_redactions")
-      .select("thread_id, text, match_type")
-      .in("thread_id", threadIds),
-    sb.from("prw_highlights").select("thread_id, text").in("thread_id", threadIds),
+  // Batched IN-queries because Supabase enforces a server-side 1000-row
+  // cap that client-side `.limit()` cannot override.
+  type RedRow = { thread_id: number; text: string; match_type: RedactionMatchType };
+  type HlRow = { thread_id: number; text: string };
+  const [reds, hls] = await Promise.all([
+    fetchInBatches<RedRow>(
+      threadIds,
+      (batch) =>
+        sb
+          .from("prw_redactions")
+          .select("thread_id, text, match_type")
+          .in("thread_id", batch),
+      "getWallThreads redactions",
+    ),
+    fetchInBatches<HlRow>(
+      threadIds,
+      (batch) =>
+        sb.from("prw_highlights").select("thread_id, text").in("thread_id", batch),
+      "getWallThreads highlights",
+    ),
   ]);
-  if (redResp.error) throw new Error(`getWallThreads redactions: ${redResp.error.message}`);
-  if (hlResp.error) throw new Error(`getWallThreads highlights: ${hlResp.error.message}`);
   const redsByThread = new Map<number, RedactionEntry[]>();
-  for (const r of (redResp.data ?? []) as {
-    thread_id: number;
-    text: string;
-    match_type: RedactionMatchType;
-  }[]) {
+  for (const r of reds) {
     if (!redsByThread.has(r.thread_id)) redsByThread.set(r.thread_id, []);
     redsByThread.get(r.thread_id)!.push({ text: r.text, match_type: r.match_type });
   }
   const hlsByThread = new Map<number, string[]>();
-  for (const h of (hlResp.data ?? []) as { thread_id: number; text: string }[]) {
+  for (const h of hls) {
     if (!hlsByThread.has(h.thread_id)) hlsByThread.set(h.thread_id, []);
     hlsByThread.get(h.thread_id)!.push(h.text);
   }
@@ -305,41 +342,46 @@ export async function getPublishedWallThreads(): Promise<WallThread[]> {
   const threadIds = typed.map((r) => r.id);
   if (threadIds.length === 0) return [];
 
-  // Qualifying messages
-  const { data: msgs } = await withRetry("wall: messages", () =>
-    sb
-      .from("prw_messages")
-      .select("thread_id, subject, sent_at, to_email")
-      .in("thread_id", threadIds)
-      .eq("is_qualifying_reply", true),
-  );
-  const msgByThread = new Map<
-    number,
-    { subject: string | null; sent_at: string; to_email: string | null }
-  >();
-  for (const m of (msgs ?? []) as {
+  // Qualifying messages — batched (server-side 1000-row cap; one
+  // qualifying message per thread, so within budget but defensive).
+  type MsgRow = {
     thread_id: number;
     subject: string | null;
     sent_at: string;
     to_email: string | null;
-  }[]) {
-    msgByThread.set(m.thread_id, m);
-  }
+  };
+  const msgs = await withRetry("wall: messages", () =>
+    fetchInBatches<MsgRow>(
+      threadIds,
+      (batch) =>
+        sb
+          .from("prw_messages")
+          .select("thread_id, subject, sent_at, to_email")
+          .in("thread_id", batch)
+          .eq("is_qualifying_reply", true),
+      "wall: messages",
+    ),
+  );
+  const msgByThread = new Map<number, MsgRow>();
+  for (const m of msgs) msgByThread.set(m.thread_id, m);
 
   // Redactions — project match_type alongside text so the renderer can
   // route literal vs word_boundary per row (ticket #013).
-  const { data: reds } = await withRetry("wall: redactions", () =>
-    sb
-      .from("prw_redactions")
-      .select("thread_id, text, match_type")
-      .in("thread_id", threadIds),
+  // Batched because Supabase enforces a server-side 1000-row cap.
+  type RedRow = { thread_id: number; text: string; match_type: RedactionMatchType };
+  const reds = await withRetry("wall: redactions", () =>
+    fetchInBatches<RedRow>(
+      threadIds,
+      (batch) =>
+        sb
+          .from("prw_redactions")
+          .select("thread_id, text, match_type")
+          .in("thread_id", batch),
+      "wall: redactions",
+    ),
   );
   const redsByThread = new Map<number, RedactionEntry[]>();
-  for (const r of (reds ?? []) as {
-    thread_id: number;
-    text: string;
-    match_type: RedactionMatchType;
-  }[]) {
+  for (const r of reds) {
     if (!redsByThread.has(r.thread_id)) redsByThread.set(r.thread_id, []);
     redsByThread.get(r.thread_id)!.push({ text: r.text, match_type: r.match_type });
   }
@@ -473,47 +515,68 @@ export async function getAdminThreads(): Promise<AdminThread[]> {
   const threadIds = rows.map((r) => r.id);
   if (threadIds.length === 0) return [];
 
-  // Qualifying messages
-  const { data: msgs } = await sb
-    .from("prw_messages")
-    .select("thread_id, subject, sent_at, to_email")
-    .in("thread_id", threadIds)
-    .eq("is_qualifying_reply", true);
-  const msgByThread = new Map<
-    number,
-    { subject: string | null; sent_at: string; to_email: string | null }
-  >();
-  for (const m of (msgs ?? []) as {
+  // Qualifying messages — batched (server-side 1000-row cap; one
+  // qualifying message per thread, so within budget but defensive).
+  type AdminMsgRow = {
     thread_id: number;
     subject: string | null;
     sent_at: string;
     to_email: string | null;
-  }[]) {
-    msgByThread.set(m.thread_id, m);
-  }
+  };
+  const msgs = await fetchInBatches<AdminMsgRow>(
+    threadIds,
+    (batch) =>
+      sb
+        .from("prw_messages")
+        .select("thread_id, subject, sent_at, to_email")
+        .in("thread_id", batch)
+        .eq("is_qualifying_reply", true),
+    "getAdminThreads messages",
+  );
+  const msgByThread = new Map<number, AdminMsgRow>();
+  for (const m of msgs) msgByThread.set(m.thread_id, m);
 
   // Redactions + highlights with id + source so admin UI can selectively
   // delete only the admin-source rows (auto entries are immutable).
   // Redactions project match_type so the renderer routes literal vs
-  // word_boundary correctly (ticket #013).
-  const [redResp, hlResp] = await Promise.all([
-    sb
-      .from("prw_redactions")
-      .select("id, thread_id, text, source, match_type")
-      .in("thread_id", threadIds),
-    sb.from("prw_highlights").select("id, thread_id, text, source").in("thread_id", threadIds),
-  ]);
-  const redsByThread = new Map<
-    number,
-    { id: number; text: string; source: string; match_type: RedactionMatchType }[]
-  >();
-  for (const r of (redResp.data ?? []) as {
+  // word_boundary correctly (ticket #013). Batched IN-queries because
+  // Supabase enforces a server-side 1000-row cap that client-side
+  // `.limit()` cannot override — without batching, the admin view
+  // silently lost rows past the first 1000 (the bug `tests/integration/
+  // wall-reader.test.ts` was written to surface).
+  type AdminRedRow = {
     id: number;
     thread_id: number;
     text: string;
     source: string;
     match_type: RedactionMatchType;
-  }[]) {
+  };
+  type AdminHlRow = { id: number; thread_id: number; text: string; source: string };
+  const [redData, hlData] = await Promise.all([
+    fetchInBatches<AdminRedRow>(
+      threadIds,
+      (batch) =>
+        sb
+          .from("prw_redactions")
+          .select("id, thread_id, text, source, match_type")
+          .in("thread_id", batch),
+      "getAdminThreads redactions",
+    ),
+    fetchInBatches<AdminHlRow>(
+      threadIds,
+      (batch) =>
+        sb
+          .from("prw_highlights")
+          .select("id, thread_id, text, source")
+          .in("thread_id", batch),
+      "getAdminThreads highlights",
+    ),
+  ]);
+  const redsByThread = new Map<
+    number,
+    { id: number; text: string; source: string; match_type: RedactionMatchType }[]
+  >();
+  for (const r of redData) {
     if (!redsByThread.has(r.thread_id)) redsByThread.set(r.thread_id, []);
     redsByThread.get(r.thread_id)!.push({
       id: r.id,
@@ -526,12 +589,7 @@ export async function getAdminThreads(): Promise<AdminThread[]> {
     number,
     { id: number; text: string; source: string }[]
   >();
-  for (const h of (hlResp.data ?? []) as {
-    id: number;
-    thread_id: number;
-    text: string;
-    source: string;
-  }[]) {
+  for (const h of hlData) {
     if (!hlsByThread.has(h.thread_id)) hlsByThread.set(h.thread_id, []);
     hlsByThread.get(h.thread_id)!.push({ id: h.id, text: h.text, source: h.source });
   }

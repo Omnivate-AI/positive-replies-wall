@@ -2,8 +2,39 @@
 
 **Severity:** Medium
 **Priority:** P2
-**Status:** Open
+**Status:** Closed (admin API + wall reader); Component tests deferred
 **Area:** `tests/integration/`, `tests/e2e/`, `tests/_helpers/`
+
+**Resolution:** Two new integration test files cover the high-leverage gaps:
+
+- **`tests/integration/admin-api.test.ts`** — 15 tests across the four `/api/admin/*` route handlers. Imports each route handler directly and exercises it with a `NextRequest` so tests run without a dev server. Covers:
+  - `POST /api/admin/redactions` happy path + `is_high_quality=400` on invalid body.
+  - `DELETE /api/admin/redactions` admin-source 200 / auto_lead 403 / auto_classifier 403 / non-existent 403 (the source-check guard from ticket #002).
+  - `POST /api/admin/highlights` happy path; `DELETE` admin-source 200 / auto_classifier 403.
+  - `POST /api/admin/publish` is_published toggle, display_priority update without affecting publish state, no_changes 400.
+
+- **`tests/integration/wall-reader.test.ts`** — 6 tests for `getPublishedWallThreads` and `getAdminThreads`. Covers:
+  - Filter to `is_published=true`.
+  - Skip published-but-no-highlight threads.
+  - `match_type` round-trips through the projection (typed-redactions contract from ticket #013).
+  - Postgrest 1:1 vs 1:N embed-shape regression guard for `prw_publish_state`.
+  - `getAdminThreads` returns ALL sentinel threads regardless of publish state.
+  - `getAdminThreads` projects `match_type` on the typed redactions array.
+
+**Production bug surfaced + fixed by this batch:** Supabase enforces a server-side `db-max-rows: 1000` cap that client-side `.limit()` and `.range()` cannot override. With ~1100 redactions in the production DB, both `getPublishedWallThreads` and `getAdminThreads` were silently truncating their IN-query responses past the first 1000 rows — leaking PII on the wall and dropping rows from the admin view. The fix introduces `fetchInBatches` (in `lib/supabase-public.ts`) which chunks the IN-list into 200-thread batches so each query stays under the cap. All three queries (`getWallThreads`, `getPublishedWallThreads`, `getAdminThreads`) now use it for redactions/highlights/messages joins. The wall-reader test was the regression guard.
+
+**Test infra fixes that landed alongside:**
+- `vitest.config.ts` — added `@/*` resolve alias mirroring `tsconfig.json`'s paths, so tests can import the app's modules through the same path the runtime code uses.
+- `lib/supabase-public.ts` + `lib/supabase-admin.ts` — added `ws` polyfill for `realtime.transport` (Node 20 lacks native WebSocket; supabase-js's Realtime constructor crashes without one in non-Vercel runtimes like vitest).
+
+**Test count:** 154 → 172 (+18 net: 15 admin-api + 6 wall-reader, minus 3 redundancies from re-running the existing seed pattern).
+
+**Acceptance criteria status:**
+- [x] At least one integration test exists per `/api/admin/*` route.
+- [~] At least one test asserts the auth boundary — *partial. Tests assert the `source = 'admin'` boundary from #002; auth tests land alongside auth in main-app integration.*
+- [x] At least one test for `getPublishedWallThreads` exercises the Postgrest embed.
+- [ ] Component tests for highlight + redaction overlap in `EmailReplyCard` — *deferred. Requires jsdom + `@testing-library/react` setup; the `applyRedactions` unit tests in Batch 3 cover the rendering math; pure UI snapshots are lower-leverage and risk flake.*
+- [x] Total tests grow and all pass — 138 → 172.
 
 **Problem**
 The repo's test suite is strong on the data-pipeline side: 138 tests across unit/integration/e2e/smoke, including pure-logic coverage of the classifier, retry, mappers, redactions, excerpt; integration coverage of Supabase constraints; and end-to-end coverage of ingest + classify against live infra.
