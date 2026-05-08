@@ -9,10 +9,12 @@
  *   4. Wall grid — up to 8 cards initially, then "Show more"
  *   5. Footer CTA — book-a-call invitation on a soft brand-tinted band
  *
- * Server-rendered. ISR revalidate=60. Resilient against transient
- * supabase fetch failures (renders empty state, no 500).
+ * Server-rendered. ISR revalidate=60. Distinguishes a real fetch failure
+ * (renders an error panel + structured `wall_fetch_failed` log line) from
+ * the legitimate "nothing published yet" empty state.
  */
 
+import Image from "next/image";
 import Link from "next/link";
 import { WallGrid } from "@/components/wall-grid";
 import { getPublishedWallThreads } from "@/lib/supabase-public";
@@ -28,10 +30,17 @@ const HERO_IMAGE =
 
 export default async function HomePage() {
   let threads: Awaited<ReturnType<typeof getPublishedWallThreads>> = [];
+  let loadError = false;
   try {
     threads = await getPublishedWallThreads();
   } catch (e) {
-    console.error("[/] getPublishedWallThreads failed:", e);
+    loadError = true;
+    console.error(
+      JSON.stringify({
+        event: "wall_fetch_failed",
+        error: e instanceof Error ? e.message : String(e),
+      }),
+    );
   }
 
   return (
@@ -40,8 +49,7 @@ export default async function HomePage() {
       <div className="border-b border-border/60 bg-surface/80 backdrop-blur">
         <div className="flex w-full items-center justify-between px-6 py-4 sm:px-8 lg:px-16">
           <Link href="/" className="flex items-center gap-2.5">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <Image
               src="/logo.png"
               alt="Omnivate"
               width={32}
@@ -79,12 +87,15 @@ export default async function HomePage() {
          * top + bottom keeps the topbar / next-section transition smooth
          * and a translucent backdrop sits behind the headline so the
          * type stays legible. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src={HERO_IMAGE}
           alt=""
           aria-hidden="true"
-          className="absolute inset-0 h-full w-full object-cover opacity-20"
+          fill
+          priority
+          sizes="100vw"
+          quality={75}
+          className="object-cover opacity-20"
         />
         <div className="absolute inset-x-0 top-0 h-24 bg-linear-to-b from-bg to-transparent" />
         <div className="absolute inset-x-0 bottom-0 h-32 bg-linear-to-t from-bg to-transparent" />
@@ -132,11 +143,23 @@ export default async function HomePage() {
       {/* ───── Wall grid ───── */}
       <section className="w-full px-6 pt-12 pb-24 sm:px-8 sm:pb-32 lg:px-16">
         {threads.length === 0 ? (
-          <div className="rounded-card border border-dashed border-border bg-bg-subtle p-16 text-center">
-            <p className="text-sm text-fg-muted">
-              No replies are published yet. Check back soon.
-            </p>
-          </div>
+          loadError ? (
+            <div
+              role="alert"
+              className="rounded-card border border-dashed border-danger/40 bg-danger-soft/40 p-16 text-center"
+            >
+              <p className="text-sm text-danger">
+                We&rsquo;re having trouble loading the wall right now. Please
+                refresh in a minute.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-card border border-dashed border-border bg-bg-subtle p-16 text-center">
+              <p className="text-sm text-fg-muted">
+                No replies are published yet. Check back soon.
+              </p>
+            </div>
+          )
         ) : (
           <WallGrid threads={threads} />
         )}
@@ -173,8 +196,7 @@ export default async function HomePage() {
       <footer className="border-t border-border bg-surface">
         <div className="flex w-full flex-col items-start justify-between gap-4 px-6 py-10 sm:flex-row sm:items-center sm:px-8 lg:px-16">
           <div className="flex items-center gap-2.5">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <Image
               src="/logo.png"
               alt=""
               width={24}

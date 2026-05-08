@@ -5,10 +5,20 @@ import "./globals.css";
 // loaded via @import in globals.css instead.
 
 export const metadata: Metadata = {
-  title: "Positive Replies Wall — Omnivate",
+  title: {
+    default: "Positive Replies — Omnivate",
+    template: "%s — Omnivate",
+  },
   description:
-    "M7: rendering POC viewer + classifier audit quiz for the positive-replies-wall project.",
-  robots: { index: false, follow: false },
+    "Verbatim positive replies to Omnivate's cold outbound, pulled live from our SDR inboxes. Names redacted, praise unedited.",
+  metadataBase: new URL("https://positive-repies-wall.vercel.app"),
+  openGraph: {
+    title: "Positive Replies — Omnivate",
+    description: "What real B2B prospects said when we cold-emailed them.",
+    type: "website",
+    url: "/",
+  },
+  twitter: { card: "summary_large_image" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

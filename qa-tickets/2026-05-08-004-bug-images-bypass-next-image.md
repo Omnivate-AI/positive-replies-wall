@@ -2,8 +2,10 @@
 
 **Severity:** High
 **Priority:** P1
-**Status:** Open
+**Status:** Closed
 **Area:** `app/page.tsx`, `app/admin/dashboard.tsx`, `app/auth/page.tsx`, `app/layout.tsx`
+
+**Resolution:** All 6 raw `<img>` tags in `app/` migrated to `next/image`. Hero on the public wall gets `fill priority sizes="100vw" quality={75}` so it's preloaded and served as AVIF/WebP. Auth-page hero gets `fill sizes="(min-width: 1024px) 50vw, 100vw"` (no priority — it's hidden on mobile and below the form fold on desktop). Logos (3 instances) use explicit `width`/`height` matching their CSS box. `next.config.ts` updated with `images.remotePatterns` for `images.unsplash.com`. All 6 `eslint-disable-next-line @next/next/no-img-element` comments removed; lint clean. Font-loading via `<link>` left in place per the existing comment in `app/layout.tsx` — the `display=swap` strategy keeps it non-blocking, and Google Sans isn't in the `next/font/google` catalog. Lighthouse / live-headers verification deferred to Batch 9 (verification). Tests pass (138/138).
 
 **Problem**
 Every image on every public surface is rendered as a raw `<img>` with `eslint-disable-next-line @next/next/no-img-element` to suppress the lint warning. There are eight occurrences across four files. The hero on the public wall is the worst offender: a 2000-pixel-wide remote Unsplash JPEG loaded as `<img src=… opacity-20 absolute inset-0 h-full w-full object-cover>` with no `width`/`height`/`sizes`/`priority` and no AVIF/WebP negotiation.

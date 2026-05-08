@@ -2,8 +2,10 @@
 
 **Severity:** Medium
 **Priority:** P2
-**Status:** Open
+**Status:** Closed
 **Area:** `app/page.tsx`
+
+**Resolution:** Wall reader now distinguishes a real fetch failure from the legitimate empty state. The catch block sets a `loadError` flag and emits a structured log line `event=wall_fetch_failed` with the error message — Vercel runtime-log search can match on it, and any future alert rule can match without parsing free-form strings. The wall renders one of three states: `WallGrid` (results), an error panel ("We're having trouble loading the wall right now. Please refresh in a minute.") on `loadError`, or the original empty panel when neither holds. Added `app/error.tsx` global error boundary so unexpected throws outside the catch hit a clean fallback UI and emit `event=page_render_failed`. Live alert wiring (Slack / email on `wall_fetch_failed` events) deferred to the M11 follow-up — the structured logs are the prerequisite, the alert rule is an infra config step.
 
 **Problem**
 The public wall handles fetch errors by logging to the server console and rendering an empty state:

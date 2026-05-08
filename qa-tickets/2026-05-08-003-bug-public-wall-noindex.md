@@ -2,8 +2,10 @@
 
 **Severity:** High
 **Priority:** P1
-**Status:** Open
+**Status:** Closed
 **Area:** `app/layout.tsx`
+
+**Resolution:** Root layout metadata rewritten — site-wide `robots: noindex, nofollow` removed. Title now uses the App Router template form (`default` + `template`). Description rewritten to describe the live wall, not the M7 POC viewer. Added `metadataBase`, OpenGraph (title, description, type, url), and Twitter card so the wall unfurls cleanly when shared. The two surfaces that *should* stay noindexed — `/admin` and `/auth` — got their own page-level `metadata` exports declaring `robots: { index: false, follow: false }`. OpenGraph image generation deferred (not in scope for this batch).
 
 **Problem**
 `app/layout.tsx:11` sets:

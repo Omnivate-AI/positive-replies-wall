@@ -10,8 +10,15 @@
  * on phones where stacked split-screens feel like wasted scroll.
  */
 
+import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { LoginForm } from "./login-form";
+
+export const metadata: Metadata = {
+  title: "Sign in",
+  robots: { index: false, follow: false },
+};
 
 // Unsplash image — picked for: warm, abstract-architectural feel that
 // reads "professional" without competing with the form. The query params
@@ -32,8 +39,7 @@ export default async function AuthPage({ searchParams }: PageProps) {
       <section className="relative flex flex-col bg-surface">
         <header className="flex items-center justify-between px-8 pt-8 sm:px-12 sm:pt-10">
           <Link href="/" className="flex items-center gap-2.5">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <Image
               src="/logo.png"
               alt="Omnivate"
               width={28}
@@ -100,11 +106,13 @@ export default async function AuthPage({ searchParams }: PageProps) {
         aria-hidden="true"
         className="relative hidden overflow-hidden bg-bg-subtle lg:block"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src={HERO_IMAGE}
           alt=""
-          className="absolute inset-0 h-full w-full object-cover"
+          fill
+          sizes="(min-width: 1024px) 50vw, 100vw"
+          quality={75}
+          className="object-cover"
         />
         {/* Dark gradient + subtle indigo wash for legibility of the overlay */}
         <div className="absolute inset-0 bg-gradient-to-tr from-[#0b0b1a]/85 via-[#0b0b1a]/40 to-transparent" />

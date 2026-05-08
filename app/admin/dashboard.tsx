@@ -22,6 +22,7 @@ import {
   useSyncExternalStore,
   useTransition,
 } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { EmailReplyCard } from "@/components/email-reply-card";
 import { buildExcerpt, pickAnchorHighlight } from "@/lib/excerpt";
@@ -389,8 +390,7 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
               className="flex min-w-0 items-center gap-2 transition-opacity hover:opacity-80"
               aria-label="Back to wall"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <Image
                 src="/logo.png"
                 alt=""
                 width={28}
