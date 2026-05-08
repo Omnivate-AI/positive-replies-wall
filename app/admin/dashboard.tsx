@@ -201,7 +201,12 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
       }
       return {
         ...t,
-        redactions: [...t.redactions, { id: tempId, text: trimmed, source: "admin" }],
+        // Admin-added redactions are literal substring matches by default
+        // (matches the API contract — see app/api/admin/redactions/route.ts).
+        redactions: [
+          ...t.redactions,
+          { id: tempId, text: trimmed, source: "admin", match_type: "literal" },
+        ],
       };
     });
     if (dupe) return;
@@ -225,7 +230,12 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
           ...t,
           redactions: [
             ...withoutTemp,
-            { id: redaction.id, text: trimmed, source: "admin" },
+            {
+              id: redaction.id,
+              text: trimmed,
+              source: "admin",
+              match_type: redaction.match_type ?? "literal",
+            },
           ],
         };
       });

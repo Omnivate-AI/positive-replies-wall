@@ -149,12 +149,29 @@ const SDR_FIRST_NAMES_LOWER = new Set([
   "omar",
 ]);
 
+/** Decide match_type for an auto-seeded redaction. Single-token strings
+ * (no whitespace, no `@`, no `.`) become `word_boundary` so a short name
+ * like "Lee" doesn't substring-leak into "feeling". Anything with whitespace
+ * or punctuation stays `literal`. Mirrors `inferMatchType` in
+ * `lib/redactions.tsx`; duplicated here to avoid pulling renderer code into
+ * the Trigger.dev runtime. */
+function inferMatchType(text: string): "literal" | "word_boundary" {
+  if (/\s/.test(text)) return "literal";
+  if (/[@.]/.test(text)) return "literal";
+  return "word_boundary";
+}
+
+export interface AutoLeadRedaction {
+  text: string;
+  match_type: "literal" | "word_boundary";
+}
+
 export function redactionsFromLead(args: {
   leadEntry: SLLeadEntry;
   matchedLead: MatchedLead | null;
-}): string[] {
+}): AutoLeadRedaction[] {
   const { leadEntry, matchedLead } = args;
-  const out: string[] = [];
+  const out: AutoLeadRedaction[] = [];
 
   const candidates = [
     matchedLead?.first_name ?? leadEntry.lead.first_name,
@@ -174,7 +191,7 @@ export function redactionsFromLead(args: {
     if (SDR_FIRST_NAMES_LOWER.has(trimmed.toLowerCase())) continue;
     if (seen.has(trimmed)) continue;
     seen.add(trimmed);
-    out.push(trimmed);
+    out.push({ text: trimmed, match_type: inferMatchType(trimmed) });
   }
   return out;
 }

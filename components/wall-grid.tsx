@@ -15,6 +15,7 @@
 import { useState } from "react";
 import { EmailReplyCard } from "./email-reply-card";
 import { buildExcerpt, pickAnchorHighlight } from "@/lib/excerpt";
+import { inferMatchType, type RedactionEntry } from "@/lib/redactions";
 import { SDR_FIRST_NAMES } from "@/lib/sdr";
 import type { WallThread } from "@/lib/supabase-public";
 
@@ -50,13 +51,27 @@ export function WallGrid({ threads }: { threads: WallThread[] }) {
       <div className="columns-1 gap-8 sm:columns-2 lg:columns-3 xl:columns-4">
         {visible.map((t) => {
           const { body, highlights } = truncatedBody(t.body, t.highlights);
+          // Defense-in-depth: db rows + SDR allowlist + sender fields all
+          // contribute to the mask set. Each entry carries its own match_type
+          // so e.g. "Lee" word-boundary matches without hitting "feeling".
+          // Single-token names → word_boundary; multi-token + emails →
+          // literal (the inferMatchType heuristic).
           const allRedactions = (() => {
-            const set = new Set(t.redactions);
-            for (const n of SDR_FIRST_NAMES) set.add(n);
-            if (t.from_display_name) set.add(t.from_display_name);
-            if (t.from_email) set.add(t.from_email);
-            if (t.to_email) set.add(t.to_email);
-            return Array.from(set);
+            const seen = new Set<string>();
+            const out: RedactionEntry[] = [];
+            const push = (text: string | null | undefined, match: RedactionEntry["match_type"]) => {
+              if (!text) return;
+              const key = `${match}|${text.toLowerCase()}`;
+              if (seen.has(key)) return;
+              seen.add(key);
+              out.push({ text, match_type: match });
+            };
+            for (const r of t.redactions) push(r.text, r.match_type);
+            for (const n of SDR_FIRST_NAMES) push(n, "word_boundary");
+            push(t.from_display_name, inferMatchType(t.from_display_name ?? ""));
+            push(t.from_email, "literal");
+            push(t.to_email, "literal");
+            return out;
           })();
           return (
             <div key={t.thread_id} className="mb-8 break-inside-avoid">

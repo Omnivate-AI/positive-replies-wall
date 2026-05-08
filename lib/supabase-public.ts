@@ -11,7 +11,14 @@
  */
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { PROMPT_VERSION } from "@/trigger/lib/classify";
 import { SDR_FIRST_NAMES } from "./sdr";
+
+/** Cap on rows returned by getPublishedWallThreads — defensive ceiling against
+ * unbounded payload growth. The page's `<WallGrid>` paginates client-side; if
+ * we ever cross this threshold the team should switch to server-side cursor
+ * pagination (see ticket #008). */
+const PUBLISHED_WALL_HARD_CAP = 500;
 
 let _client: SupabaseClient | null = null;
 
@@ -62,6 +69,19 @@ export interface ReplyStats {
   promptVersion: string;
 }
 
+/** How a redaction text matches against body content.
+ *   - "literal": case-insensitive substring (current default; required for
+ *     emails, domains, multi-token names, anything with punctuation).
+ *   - "word_boundary": case-insensitive whole-word match — `\bX\b` — so a
+ *     short single-token name like "Lee" doesn't substring-leak into
+ *     "feeling", "Greeley", "tunneling". */
+export type RedactionMatchType = "literal" | "word_boundary";
+
+export interface RedactionEntry {
+  text: string;
+  match_type: RedactionMatchType;
+}
+
 export interface WallThread {
   thread_id: number;
   from_email: string;
@@ -78,8 +98,9 @@ export interface WallThread {
   highlights: string[];
   /** ISO timestamp of the qualifying inbound message. */
   received_at: string | null;
-  /** Distinct redaction strings to mask, deduped across all sources. */
-  redactions: string[];
+  /** Redactions to mask in the rendered body, with each entry's match mode.
+   * Deduped across all sources (db + SDR allowlist + sender fields). */
+  redactions: RedactionEntry[];
   total_score: number;
 }
 
@@ -89,16 +110,12 @@ export interface WallThread {
 export async function getWallThreads(limit = 10): Promise<WallThread[]> {
   const sb = getClient();
 
-  // 1. Latest prompt_version present.
-  const { data: latest } = await sb
-    .from("prw_classifications")
-    .select("prompt_version")
-    .order("prompt_version", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const promptVersion = latest?.prompt_version ?? "v2.0";
+  // The classifier writes at PROMPT_VERSION (single source of truth in
+  // trigger/lib/classify); reading it directly avoids semver/string-sort
+  // bugs at version rollovers like v2.10 (see ticket #009).
+  const promptVersion = PROMPT_VERSION;
 
-  // 2. Top N high-quality classifications + their threads.
+  // Top N high-quality classifications + their threads.
   const { data: rows, error: cErr } = await sb
     .from("prw_classifications")
     .select(
@@ -160,17 +177,25 @@ export async function getWallThreads(limit = 10): Promise<WallThread[]> {
     });
   }
 
-  // 4. Redactions + highlights for these threads.
+  // 4. Redactions + highlights for these threads. Project match_type so
+  // the renderer routes literal vs word_boundary per row (ticket #013).
   const [redResp, hlResp] = await Promise.all([
-    sb.from("prw_redactions").select("thread_id, text").in("thread_id", threadIds),
+    sb
+      .from("prw_redactions")
+      .select("thread_id, text, match_type")
+      .in("thread_id", threadIds),
     sb.from("prw_highlights").select("thread_id, text").in("thread_id", threadIds),
   ]);
   if (redResp.error) throw new Error(`getWallThreads redactions: ${redResp.error.message}`);
   if (hlResp.error) throw new Error(`getWallThreads highlights: ${hlResp.error.message}`);
-  const redsByThread = new Map<number, Set<string>>();
-  for (const r of (redResp.data ?? []) as { thread_id: number; text: string }[]) {
-    if (!redsByThread.has(r.thread_id)) redsByThread.set(r.thread_id, new Set());
-    redsByThread.get(r.thread_id)!.add(r.text);
+  const redsByThread = new Map<number, RedactionEntry[]>();
+  for (const r of (redResp.data ?? []) as {
+    thread_id: number;
+    text: string;
+    match_type: RedactionMatchType;
+  }[]) {
+    if (!redsByThread.has(r.thread_id)) redsByThread.set(r.thread_id, []);
+    redsByThread.get(r.thread_id)!.push({ text: r.text, match_type: r.match_type });
   }
   const hlsByThread = new Map<number, string[]>();
   for (const h of (hlResp.data ?? []) as { thread_id: number; text: string }[]) {
@@ -184,10 +209,18 @@ export async function getWallThreads(limit = 10): Promise<WallThread[]> {
       .join(" ")
       .trim();
     const msg = msgByThread.get(r.thread_id);
-    const reds = redsByThread.get(r.thread_id);
-    const allRedactions = new Set<string>(reds ?? []);
-    for (const name of SDR_FIRST_NAMES) allRedactions.add(name);
-    if (msg?.to_email) allRedactions.add(msg.to_email);
+    const reds = redsByThread.get(r.thread_id) ?? [];
+    const allRedactions: RedactionEntry[] = [...reds];
+    const seenTexts = new Set(reds.map((re) => re.text.toLowerCase()));
+    for (const name of SDR_FIRST_NAMES) {
+      if (!seenTexts.has(name.toLowerCase())) {
+        allRedactions.push({ text: name, match_type: "word_boundary" });
+        seenTexts.add(name.toLowerCase());
+      }
+    }
+    if (msg?.to_email && !seenTexts.has(msg.to_email.toLowerCase())) {
+      allRedactions.push({ text: msg.to_email, match_type: "literal" });
+    }
     return {
       thread_id: r.thread_id,
       from_email: r.thread.lead_email,
@@ -197,7 +230,7 @@ export async function getWallThreads(limit = 10): Promise<WallThread[]> {
       body: r.cleaned_reply_text ?? "",
       highlights: hlsByThread.get(r.thread_id) ?? [],
       received_at: msg?.sent_at ?? null,
-      redactions: Array.from(allRedactions),
+      redactions: allRedactions,
       total_score: r.total_score,
     };
   });
@@ -211,19 +244,12 @@ export async function getWallThreads(limit = 10): Promise<WallThread[]> {
 export async function getPublishedWallThreads(): Promise<WallThread[]> {
   const sb = getClient();
 
-  // 1. Latest prompt version present.
-  const { data: latest } = await withRetry("latest prompt_version", () =>
-    sb
-      .from("prw_classifications")
-      .select("prompt_version")
-      .order("prompt_version", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  );
-  const promptVersion = latest?.prompt_version ?? "v2.0";
+  // PROMPT_VERSION is the single source of truth — see ticket #009.
+  const promptVersion = PROMPT_VERSION;
 
-  // 2. All published threads with at least one highlight, plus their
-  // classification + publish state.
+  // All published threads with at least one highlight, plus their
+  // classification + publish state. Defensive `.limit()` prevents an
+  // unbounded HTML payload at scale (ticket #008).
   const { data: rows, error } = await withRetry("getPublishedWallThreads", () =>
     sb
       .from("prw_threads")
@@ -239,9 +265,20 @@ export async function getPublishedWallThreads(): Promise<WallThread[]> {
         `,
       )
       .eq("classification.prompt_version", promptVersion)
-      .eq("publish_state.is_published", true),
+      .eq("publish_state.is_published", true)
+      .limit(PUBLISHED_WALL_HARD_CAP),
   );
   if (error) throw new Error(`getPublishedWallThreads: ${error.message}`);
+  if (rows && rows.length >= PUBLISHED_WALL_HARD_CAP) {
+    console.warn(
+      JSON.stringify({
+        event: "wall_hard_cap_hit",
+        cap: PUBLISHED_WALL_HARD_CAP,
+        message:
+          "Published-thread query returned the hard cap row count. Switch to cursor pagination before this saturates.",
+      }),
+    );
+  }
 
   // Postgrest embed shape: 1:1 relations (FK to PK) come back as a single
   // object; 1:N come back as an array. prw_publish_state.thread_id is PK,
@@ -287,14 +324,22 @@ export async function getPublishedWallThreads(): Promise<WallThread[]> {
     msgByThread.set(m.thread_id, m);
   }
 
-  // Redactions
+  // Redactions — project match_type alongside text so the renderer can
+  // route literal vs word_boundary per row (ticket #013).
   const { data: reds } = await withRetry("wall: redactions", () =>
-    sb.from("prw_redactions").select("thread_id, text").in("thread_id", threadIds),
+    sb
+      .from("prw_redactions")
+      .select("thread_id, text, match_type")
+      .in("thread_id", threadIds),
   );
-  const redsByThread = new Map<number, Set<string>>();
-  for (const r of (reds ?? []) as { thread_id: number; text: string }[]) {
-    if (!redsByThread.has(r.thread_id)) redsByThread.set(r.thread_id, new Set());
-    redsByThread.get(r.thread_id)!.add(r.text);
+  const redsByThread = new Map<number, RedactionEntry[]>();
+  for (const r of (reds ?? []) as {
+    thread_id: number;
+    text: string;
+    match_type: RedactionMatchType;
+  }[]) {
+    if (!redsByThread.has(r.thread_id)) redsByThread.set(r.thread_id, []);
+    redsByThread.get(r.thread_id)!.push({ text: r.text, match_type: r.match_type });
   }
 
   // Bullet-proof field access — every nested resource gets optional
@@ -312,9 +357,17 @@ export async function getPublishedWallThreads(): Promise<WallThread[]> {
       const ps = r.publish_state; // single object (1:1 via PK)
       const hls = r.highlights ?? [];
       const msg = msgByThread.get(r.id);
-      const reds = redsByThread.get(r.id);
-      const redactions = new Set<string>(reds ?? []);
-      for (const n of SDR_FIRST_NAMES) redactions.add(n);
+      const reds = redsByThread.get(r.id) ?? [];
+      const redactions: RedactionEntry[] = [...reds];
+      const seenTexts = new Set(reds.map((re) => re.text.toLowerCase()));
+      // SDR allowlist: single-token first names → word_boundary (so "Lee"
+      // matches "Lee" but not "feeling", "Greeley", etc.).
+      for (const n of SDR_FIRST_NAMES) {
+        if (!seenTexts.has(n.toLowerCase())) {
+          redactions.push({ text: n, match_type: "word_boundary" });
+          seenTexts.add(n.toLowerCase());
+        }
+      }
       return {
         thread_id: r.id,
         from_email: r.lead_email,
@@ -324,7 +377,7 @@ export async function getPublishedWallThreads(): Promise<WallThread[]> {
         body: c?.cleaned_reply_text ?? "",
         highlights: hls.map((h) => h.text),
         received_at: msg?.sent_at ?? null,
-        redactions: Array.from(redactions),
+        redactions,
         total_score: c?.total_score ?? 0,
         _ok: !!(c && ps && hls.length > 0),
         _sortKey: {
@@ -369,7 +422,7 @@ export interface AdminThread {
   is_high_quality: boolean;
   is_published: boolean;
   display_priority: number;
-  redactions: { id: number; text: string; source: string }[];
+  redactions: { id: number; text: string; source: string; match_type: RedactionMatchType }[];
   highlights: { id: number; text: string; source: string }[];
 }
 
@@ -439,22 +492,33 @@ export async function getAdminThreads(): Promise<AdminThread[]> {
 
   // Redactions + highlights with id + source so admin UI can selectively
   // delete only the admin-source rows (auto entries are immutable).
+  // Redactions project match_type so the renderer routes literal vs
+  // word_boundary correctly (ticket #013).
   const [redResp, hlResp] = await Promise.all([
-    sb.from("prw_redactions").select("id, thread_id, text, source").in("thread_id", threadIds),
+    sb
+      .from("prw_redactions")
+      .select("id, thread_id, text, source, match_type")
+      .in("thread_id", threadIds),
     sb.from("prw_highlights").select("id, thread_id, text, source").in("thread_id", threadIds),
   ]);
   const redsByThread = new Map<
     number,
-    { id: number; text: string; source: string }[]
+    { id: number; text: string; source: string; match_type: RedactionMatchType }[]
   >();
   for (const r of (redResp.data ?? []) as {
     id: number;
     thread_id: number;
     text: string;
     source: string;
+    match_type: RedactionMatchType;
   }[]) {
     if (!redsByThread.has(r.thread_id)) redsByThread.set(r.thread_id, []);
-    redsByThread.get(r.thread_id)!.push({ id: r.id, text: r.text, source: r.source });
+    redsByThread.get(r.thread_id)!.push({
+      id: r.id,
+      text: r.text,
+      source: r.source,
+      match_type: r.match_type,
+    });
   }
   const hlsByThread = new Map<
     number,
@@ -476,11 +540,15 @@ export async function getAdminThreads(): Promise<AdminThread[]> {
         .filter(Boolean)
         .join(" ")
         .trim();
-      // Pick the latest classification (highest prompt_version).
+      // Pick the classification at the current PROMPT_VERSION; fall back to
+      // any older row if the thread hasn't been re-classified yet (which the
+      // admin still wants to see). String-sorting the prompt_version was
+      // wrong — see ticket #009 (`v2.10` < `v2.2` lexicographically).
       const classifs = r.classification ?? [];
-      const latest = classifs.length > 0
-        ? [...classifs].sort((a, b) => b.prompt_version.localeCompare(a.prompt_version))[0]
-        : null;
+      const latest =
+        classifs.find((c) => c.prompt_version === PROMPT_VERSION) ??
+        classifs[0] ??
+        null;
       const ps = r.publish_state ?? null; // single object via 1:1 FK
       const msg = msgByThread.get(r.id);
       return {
@@ -529,14 +597,8 @@ export async function getReplyStats(): Promise<ReplyStats> {
     .select("*", { count: "exact", head: true });
   if (totalErr) throw new Error(`getReplyStats totalReplies: ${totalErr.message}`);
 
-  const { data: latestRow, error: latestErr } = await sb
-    .from("prw_classifications")
-    .select("prompt_version")
-    .order("prompt_version", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (latestErr) throw new Error(`getReplyStats latestRow: ${latestErr.message}`);
-  const promptVersion = latestRow?.prompt_version ?? "v2.0";
+  // PROMPT_VERSION is the writer's source of truth — see ticket #009.
+  const promptVersion = PROMPT_VERSION;
 
   const { count: highQualityCount, error: hqErr } = await sb
     .from("prw_classifications")

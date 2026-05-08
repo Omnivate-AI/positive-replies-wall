@@ -67,13 +67,27 @@ export async function DELETE(request: NextRequest) {
   }
 
   const sb = supabaseAdmin();
+  // Filter on source = 'admin' so auto_lead PII redactions and auto_classifier
+  // rows can never be deleted through this endpoint, even with a hand-crafted
+  // request. Auto rows are immutable contracts: deleting an auto_lead row
+  // would leak the prospect's name/company/email onto the wall until the
+  // next ingest re-seeds it. See ticket #002.
   const { data, error } = await sb
     .from("prw_redactions")
     .delete()
     .eq("id", parsed.id)
+    .eq("source", "admin")
     .select();
   if (error) {
     return NextResponse.json({ error: "db_error", message: error.message }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, removed: data?.length ?? 0 });
+  if (!data || data.length === 0) {
+    // Either the id doesn't exist or its source isn't 'admin'. Treat as 403
+    // either way — both are equally a refusal to honor the request.
+    return NextResponse.json(
+      { error: "forbidden", message: "Only admin-source redactions can be deleted." },
+      { status: 403 },
+    );
+  }
+  return NextResponse.json({ ok: true, removed: data.length });
 }

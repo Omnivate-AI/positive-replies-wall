@@ -66,13 +66,23 @@ export async function DELETE(request: NextRequest) {
   }
 
   const sb = supabaseAdmin();
+  // Filter on source = 'admin' so auto_classifier rows can't be deleted via
+  // the API. Auto rows re-seed on the next classify run; admin rows are the
+  // only ones meant to be removable through this endpoint. See ticket #002.
   const { data, error } = await sb
     .from("prw_highlights")
     .delete()
     .eq("id", parsed.id)
+    .eq("source", "admin")
     .select();
   if (error) {
     return NextResponse.json({ error: "db_error", message: error.message }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, removed: data?.length ?? 0 });
+  if (!data || data.length === 0) {
+    return NextResponse.json(
+      { error: "forbidden", message: "Only admin-source highlights can be deleted." },
+      { status: 403 },
+    );
+  }
+  return NextResponse.json({ ok: true, removed: data.length });
 }

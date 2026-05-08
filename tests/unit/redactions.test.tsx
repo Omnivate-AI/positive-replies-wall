@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isValidElement, type ReactNode } from "react";
-import { applyRedactions } from "../../lib/redactions.js";
+import { applyRedactions, inferMatchType } from "../../lib/redactions.js";
 
 /** Flatten the React node returned by applyRedactions into a plain array of
  * { kind: 'text' | 'redact', text } so assertions stay readable. */
@@ -92,5 +92,96 @@ describe("applyRedactions", () => {
     const out = flatten(applyRedactions("Mark goes home with Mark", ["Mark"]));
     expect(out[0]).toEqual({ kind: "redact", text: "Mark" });
     expect(out[out.length - 1]).toEqual({ kind: "redact", text: "Mark" });
+  });
+});
+
+// Word-boundary mode (ticket #013): short single-token names must not
+// substring-leak into unrelated words.
+describe("applyRedactions — word_boundary mode", () => {
+  it("`Ed` (word_boundary) does NOT mask `editor`", () => {
+    const out = flatten(
+      applyRedactions("Hi Ed, the editor said yes.", [
+        { text: "Ed", match_type: "word_boundary" },
+      ]),
+    );
+    const reds = out.filter((s) => s.kind === "redact").map((s) => s.text);
+    // Only the standalone "Ed" should be masked. "editor" must survive intact.
+    expect(reds).toEqual(["Ed"]);
+    const text = out
+      .filter((s) => s.kind === "text")
+      .map((s) => s.text)
+      .join("");
+    expect(text).toContain("editor");
+  });
+
+  it("`Lee` (word_boundary) does NOT mask `feeling`, `Greeley`, or `tunneling`", () => {
+    const out = flatten(
+      applyRedactions("Lee was feeling fine in Greeley while tunneling.", [
+        { text: "Lee", match_type: "word_boundary" },
+      ]),
+    );
+    const reds = out.filter((s) => s.kind === "redact").map((s) => s.text);
+    expect(reds).toEqual(["Lee"]);
+  });
+
+  it("`Apple` (word_boundary) does NOT mask `pineapple` or `dapple`", () => {
+    const out = flatten(
+      applyRedactions("Apple is not pineapple and dapple isn't either.", [
+        { text: "Apple", match_type: "word_boundary" },
+      ]),
+    );
+    const reds = out.filter((s) => s.kind === "redact").map((s) => s.text);
+    expect(reds).toEqual(["Apple"]);
+  });
+
+  it("`eli@xyz.com` (literal) still masks the full email amid punctuation", () => {
+    const out = flatten(
+      applyRedactions("Reach me at (eli@xyz.com), thanks.", [
+        { text: "eli@xyz.com", match_type: "literal" },
+      ]),
+    );
+    const reds = out.filter((s) => s.kind === "redact").map((s) => s.text);
+    expect(reds).toEqual(["eli@xyz.com"]);
+  });
+
+  it("backwards-compat: bare strings are treated as literal", () => {
+    // "Ed" passed as a bare string (legacy) IS a substring match — masks
+    // the "ed" inside "editor". This is the M9-era behavior; new typed
+    // callers can opt out by passing { text, match_type: "word_boundary" }.
+    // Case-insensitive match returns the matched span (source case), so
+    // "ed" — not "Ed" — is the redacted text here.
+    const out = flatten(applyRedactions("the editor", ["Ed"]));
+    const reds = out.filter((s) => s.kind === "redact").map((s) => s.text);
+    expect(reds).toEqual(["ed"]);
+  });
+
+  it("mixed inputs (typed + string) compose correctly", () => {
+    const out = flatten(
+      applyRedactions("Lee replied. Apple is delicious.", [
+        { text: "Lee", match_type: "word_boundary" },
+        "Apple", // literal via legacy form
+      ]),
+    );
+    const reds = out.filter((s) => s.kind === "redact").map((s) => s.text);
+    expect(reds).toEqual(["Lee", "Apple"]);
+  });
+});
+
+describe("inferMatchType()", () => {
+  it("single-token names → word_boundary", () => {
+    expect(inferMatchType("Lee")).toBe("word_boundary");
+    expect(inferMatchType("Mauritz")).toBe("word_boundary");
+    expect(inferMatchType("Apple")).toBe("word_boundary");
+  });
+
+  it("multi-token strings → literal", () => {
+    expect(inferMatchType("Mauritz Gilfillan")).toBe("literal");
+    expect(inferMatchType("Apple Inc")).toBe("literal");
+  });
+
+  it("strings with `@` or `.` → literal (emails, domains)", () => {
+    expect(inferMatchType("eli@xyz.com")).toBe("literal");
+    expect(inferMatchType("example.com")).toBe("literal");
+    expect(inferMatchType("foo.bar")).toBe("literal");
   });
 });

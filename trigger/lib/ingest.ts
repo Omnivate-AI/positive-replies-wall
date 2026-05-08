@@ -258,13 +258,15 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestStats> 
         // Reconcile the qualifying-reply flag — earliest inbound message wins.
         await reconcileQualifyingReply(sb, threadId!, stats);
 
-        // Seed auto_lead redactions.
-        const redactionTexts = redactionsFromLead({ leadEntry, matchedLead });
-        if (redactionTexts.length > 0) {
-          const redactionRows = redactionTexts.map((text) => ({
+        // Seed auto_lead redactions. Each row's match_type is decided by
+        // the mapper's heuristic — single-token names get word_boundary so
+        // "Lee" doesn't mask "feeling". See ticket #013.
+        const redactionEntries = redactionsFromLead({ leadEntry, matchedLead });
+        if (redactionEntries.length > 0) {
+          const redactionRows = redactionEntries.map((r) => ({
             thread_id: threadId!,
-            text,
-            match_type: "literal",
+            text: r.text,
+            match_type: r.match_type,
             source: "auto_lead",
           }));
           try {

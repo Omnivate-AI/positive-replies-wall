@@ -16,11 +16,16 @@
 
 import { Fragment, type ReactNode } from "react";
 import clsx from "clsx";
-import { applyRedactions } from "@/lib/redactions";
+import { applyRedactions, type RedactionEntry } from "@/lib/redactions";
 
 // Re-export so existing call sites (the M7 quiz, the OG route, the POC viewer)
 // keep working without import-path changes.
 export { applyRedactions };
+export type { RedactionEntry };
+
+/** Either a typed redaction (with an explicit match_type) or a bare string
+ * (treated as `match_type: "literal"` for backward compat). */
+export type Redaction = string | RedactionEntry;
 
 export interface EmailReplyCardProps {
   from_email: string;
@@ -30,8 +35,10 @@ export interface EmailReplyCardProps {
   body: string;
   /** When the reply landed. Shown right-aligned next to the sender row. */
   received_at?: string | null;
-  /** Strings to mask with black bars. Empty = no redaction. */
-  redactions?: string[];
+  /** Strings to mask with black bars. Each entry is either a bare string
+   * (literal substring match — legacy) or a typed entry that selects
+   * literal vs word_boundary matching. Empty = no redaction. */
+  redactions?: Redaction[];
   /** Verbatim phrases from `body` to wrap in a quiet purple highlight. The
    * renderer wraps every occurrence of every phrase. Multiple highlights
    * per card are first-class — pass `[]` to disable highlighting entirely. */
@@ -63,7 +70,7 @@ function formatReceivedAt(iso?: string | null): string {
  * — both visual treatments stack cleanly. */
 function renderParagraph(
   para: string,
-  redactions: string[],
+  redactions: Redaction[],
   highlights: string[],
 ): ReactNode {
   const valid = highlights.filter((h) => h && h.length > 0);
@@ -116,7 +123,7 @@ export function ReplyBody({
   className,
 }: {
   body: string;
-  redactions?: string[];
+  redactions?: Redaction[];
   highlights?: string[];
   className?: string;
 }) {

@@ -134,7 +134,7 @@ describe("toMessageInsert", () => {
 });
 
 describe("redactionsFromLead", () => {
-  it("yields first/last/company/email from the matched lead, deduped", () => {
+  it("yields first/last/company/email from the matched lead, deduped, with match_type per row", () => {
     const out = redactionsFromLead({
       leadEntry: fixtureLeadEntry,
       matchedLead: {
@@ -145,12 +145,24 @@ describe("redactionsFromLead", () => {
         company_name: "Heru",
       },
     });
-    expect(out).toEqual(["Mark", "Richards", "Heru", "mark@heru.net"]);
+    expect(out).toEqual([
+      // Single-token names → word_boundary so "Mark" doesn't substring-leak.
+      { text: "Mark", match_type: "word_boundary" },
+      { text: "Richards", match_type: "word_boundary" },
+      { text: "Heru", match_type: "word_boundary" },
+      // Email contains @ + . → literal.
+      { text: "mark@heru.net", match_type: "literal" },
+    ]);
   });
 
   it("falls back to Smartlead lead fields when no match", () => {
     const out = redactionsFromLead({ leadEntry: fixtureLeadEntry, matchedLead: null });
-    expect(out).toEqual(["Mark", "Richards", "Heru", "mrichards@heru.net"]);
+    expect(out).toEqual([
+      { text: "Mark", match_type: "word_boundary" },
+      { text: "Richards", match_type: "word_boundary" },
+      { text: "Heru", match_type: "word_boundary" },
+      { text: "mrichards@heru.net", match_type: "literal" },
+    ]);
   });
 
   it("skips SDR first names and length-1 names", () => {
@@ -167,7 +179,10 @@ describe("redactionsFromLead", () => {
       matchedLead: null,
     });
     // SDR first name + length-1 last name skipped; email + company kept.
-    expect(out).toEqual(["Heru", "mrichards@heru.net"]);
+    expect(out).toEqual([
+      { text: "Heru", match_type: "word_boundary" },
+      { text: "mrichards@heru.net", match_type: "literal" },
+    ]);
   });
 
   it("returns email-only when names + company are absent", () => {
@@ -183,6 +198,25 @@ describe("redactionsFromLead", () => {
       },
       matchedLead: null,
     });
-    expect(out).toEqual(["mrichards@heru.net"]);
+    expect(out).toEqual([{ text: "mrichards@heru.net", match_type: "literal" }]);
+  });
+
+  it("multi-token company names get literal match_type", () => {
+    const out = redactionsFromLead({
+      leadEntry: fixtureLeadEntry,
+      matchedLead: {
+        id: 1,
+        first_name: "Mauritz",
+        last_name: "Gilfillan",
+        email: "mauritz@example.com",
+        company_name: "Acme Corp",
+      },
+    });
+    // First/last single tokens → word_boundary; multi-token company → literal;
+    // email → literal.
+    expect(out).toContainEqual({ text: "Mauritz", match_type: "word_boundary" });
+    expect(out).toContainEqual({ text: "Gilfillan", match_type: "word_boundary" });
+    expect(out).toContainEqual({ text: "Acme Corp", match_type: "literal" });
+    expect(out).toContainEqual({ text: "mauritz@example.com", match_type: "literal" });
   });
 });

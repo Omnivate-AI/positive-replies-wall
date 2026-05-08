@@ -2,8 +2,10 @@
 
 **Severity:** Medium
 **Priority:** P2
-**Status:** Open
+**Status:** Closed
 **Area:** `lib/supabase-public.ts`, `components/wall-grid.tsx`, `app/page.tsx`
+
+**Resolution:** Added a defensive `.limit(PUBLISHED_WALL_HARD_CAP)` (constant set to 500 in `lib/supabase-public.ts`) to `getPublishedWallThreads`'s primary thread query. When the result count hits the cap, the function emits a structured `event=wall_hard_cap_hit` warning so a future Vercel-log alert can fire before the wall silently truncates. Full server-side cursor pagination is the proper long-term fix and tracked as a follow-up in `components/wall-grid.tsx`'s comment — but at the project's current scale (dozens of published threads) it's not yet worth the refactor cost. The hard cap is the deferred-decision tripwire so the deferral can't expire silently.
 
 **Problem**
 `getPublishedWallThreads()` (`lib/supabase-public.ts:211-358`) issues an unbounded SELECT against `prw_threads` joined to `prw_classifications`, `prw_publish_state`, `prw_highlights`, plus a follow-up `prw_messages` and `prw_redactions` `IN (…threadIds)`. There is no `.limit()` and no pagination.

@@ -2,8 +2,18 @@
 
 **Severity:** Medium
 **Priority:** P2
-**Status:** Open
+**Status:** Closed
 **Area:** `lib/redactions.tsx`, `migrations/003-restructure-threads.sql`
+
+**Resolution:** End-to-end migration to typed redactions with explicit `match_type` per row.
+
+- `lib/redactions.tsx` — `applyRedactions` now accepts `(string | RedactionEntry)[]`. String entries stay literal (backward compat for legacy callers and tests); typed entries route by `match_type`. New `inferMatchType(text)` heuristic exposed for callers that need to derive a default — single-token strings without `@`/`.` → `word_boundary`, everything else → `literal`.
+- `components/email-reply-card.tsx` — `Redaction` type alias added; `EmailReplyCard.redactions`, `ReplyBody.redactions`, and `renderParagraph` all accept `Redaction[]`.
+- `lib/supabase-public.ts` — `WallThread.redactions` typed as `RedactionEntry[]` (was `string[]`). `AdminThread.redactions` adds `match_type`. Both `getPublishedWallThreads` and `getAdminThreads` (and the legacy `getWallThreads` / `/m7/pocs`) project `match_type` from `prw_redactions`.
+- `components/wall-grid.tsx` — handles typed redactions; supplementary defense-in-depth entries (SDR allowlist names, `from_display_name`, `from_email`, `to_email`) are added with appropriate `match_type` (allowlist → `word_boundary`; emails → `literal`; display name → heuristic via `inferMatchType`).
+- `trigger/lib/mappers.ts` — `redactionsFromLead` returns `AutoLeadRedaction[]` with per-row `match_type`. The heuristic mirrors the renderer's `inferMatchType`. `trigger/lib/ingest.ts` writes the heuristic decision into `prw_redactions.match_type` instead of hard-coding `"literal"`.
+- `migrations/005-redaction-word-boundary.sql` — backfill for existing `auto_lead` rows. UPDATEs rows where `text` has no whitespace/`@`/`.` to `match_type='word_boundary'`. Idempotent. **Not applied** in this commit (touches prod data; apply via the team's normal migration flow).
+- Tests — `tests/unit/redactions.test.tsx` adds 6 new word_boundary cases (Ed/editor, Lee/feeling-Greeley-tunneling, Apple/pineapple, eli@xyz.com literal-with-punctuation, backwards-compat, mixed inputs) plus 3 cases covering `inferMatchType`. `tests/unit/mappers.test.ts` updated to the new tuple shape; adds a multi-token-company-name case. All 148/148 tests pass.
 
 **Problem**
 The redaction renderer (`lib/redactions.tsx:21-50`) and the email-reply-card highlight overlay (`components/email-reply-card.tsx:64-107`) match redaction strings as case-insensitive substrings of the body text:

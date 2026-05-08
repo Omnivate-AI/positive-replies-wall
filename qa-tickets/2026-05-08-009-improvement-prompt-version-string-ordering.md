@@ -2,8 +2,10 @@
 
 **Severity:** Medium
 **Priority:** P2
-**Status:** Open
+**Status:** Closed
 **Area:** `lib/supabase-public.ts` (3 occurrences), classifier batch logic
+
+**Resolution:** All four `prompt_version` ordering sites in `lib/supabase-public.ts` now read `PROMPT_VERSION` directly from `trigger/lib/classify` — the same constant the writer uses. The DB-side ORDER BY + `localeCompare()` patterns are gone; the post-`v2.10` semver ordering bug is structurally impossible because there's no ordering at all. The fallback `?? "v2.0"` literals are removed (they masked DB query failures). Both `getPublishedWallThreads` and `getAdminThreads` use the same source of truth. `getAdminThreads` falls back to `classifs[0]` when the thread hasn't been classified at the current PROMPT_VERSION yet (preserves the admin's ability to see older classifications during version transitions). Test-side: `tests/unit/classify-schema.test.ts` already asserts `PROMPT_VERSION === "v2.0"`; no additional ordering test needed because there's no ordering function to test.
 
 **Problem**
 Several queries pick the "latest" classifier prompt version by string-sorting the `prompt_version` text column descending:
