@@ -321,3 +321,77 @@ Estimated work: ~1 hour including the smoke-test.
 | Specific reply showing wrong sender | [Section 4](#4-debug-a-reply-showing-the-wrong-sender-info) |
 | Pipeline keeps timing out | `trigger.config.ts` `maxDuration` is 4h — if you're hitting it, the Smartlead pull is slower than expected. Check Smartlead status; consider scoping with `campaignIds` |
 | Page super slow | Vercel `Functions` tab — ISR might be miss-revalidating. The wall route's `revalidate` is 60s |
+| Admin button click looks like it worked, redaction comes back on refresh | The mutation hook captured rollback state inside a `setState((prev) => …)` updater. See [Development gotchas → Mutation rollback state must be passed via args](#mutation-rollback-state-must-be-passed-via-args) |
+
+---
+
+## Development gotchas — known patterns to avoid
+
+### Mutation rollback state must be passed via args, never captured inside a setState updater
+
+**Symptom:** an admin click (publish toggle, redact, highlight, priority) looks like it worked optimistically, but on page refresh the change is gone — or comes back on refresh after the user "removed" something. Errors don't surface in the UI; the rollback path silently no-ops.
+
+**Root cause:** under React 19 (concurrent mode), state updater functions don't run synchronously when you call `setState((prev) => …)`. The updater is queued and executed during the next render commit. So a pattern like:
+
+```ts
+// ❌ BROKEN — captured `target` is stale when onMutate returns.
+let target: AdminRedaction | null = null;
+setThreads((prev) =>
+  prev.map((t) => {
+    const found = t.redactions.find((r) => r.id === redactionId);
+    if (!found) return t;
+    target = found;            // ← runs LATER, during render
+    return { ...t, redactions: t.redactions.filter(...) };
+  }),
+);
+return { target };              // ← runs NOW, target is still null
+```
+
+…returns `{ target: null }` to React Query's `onError` context. The rollback then has no value to roll back to and no-ops. The user-visible bug is "I clicked unredact but nothing happened" or "the redaction came back on refresh."
+
+This is the same shape as project report's lesson 2.5. It re-emerged in Batch 5 of the QA refactor and was caught (eventually) when manual testing showed an admin "hari" redaction couldn't be removed via the UI.
+
+**Fix pattern — read synchronously in the caller, pass via mutate args:**
+
+```ts
+// ✅ FIXED — caller reads state synchronously, passes through.
+function removeRedaction(threadId: number, redactionId: number) {
+  const target = threads
+    .find((t) => t.thread_id === threadId)
+    ?.redactions.find((r) => r.id === redactionId);
+  if (!target || target.source !== "admin") return;
+  mutations.removeRedaction.mutate({ threadId, redactionId, target });
+}
+
+// In the hook:
+useMutation<void, Error, RemoveRedactionArgs>({
+  onMutate: ({ threadId, redactionId }) => {
+    // Pure forward update — no state capture here.
+    setThreads((prev) =>
+      prev.map((t) =>
+        t.thread_id === threadId
+          ? { ...t, redactions: t.redactions.filter((r) => r.id !== redactionId) }
+          : t,
+      ),
+    );
+  },
+  onError: (err, { threadId, target }) => {
+    // Rollback uses the target passed in by the caller.
+    setThreads((prev) =>
+      prev.map((t) =>
+        t.thread_id === threadId
+          ? { ...t, redactions: [...t.redactions, target] }
+          : t,
+      ),
+    );
+  },
+});
+```
+
+**Rule of thumb:** if the rollback in `onError` (or the success reconcile in `onSuccess`) needs to know what the value WAS before the mutation, the caller must read it from the parent closure synchronously and pass it through `mutate({ ...args, target })`. Never derive it inside the `setState` updater.
+
+This applies to anything that needs `prevValue` / `target` / `tempId` / `dupe` for cross-phase reasoning — toggle, set-priority, add (needs tempId for the success reconcile), and remove (needs target for the error rollback) all hit the same trap.
+
+**Where this is enforced today:** `app/admin/_hooks/use-admin-mutations.ts` (each hook accepts captured state via args) + `app/admin/dashboard.tsx` (each handler reads state synchronously). Reference: Batch 11 commit (`5bcf4d7`), or grep `report.md` for "lesson 2.5".
+
+**Test for regression:** the integration tests in `tests/integration/admin-api.test.ts` cover the API surface but don't catch this — it's a client-only concern. The cheapest catch is a manual smoke during code review: click an admin mutation, refresh, confirm the change persisted.
