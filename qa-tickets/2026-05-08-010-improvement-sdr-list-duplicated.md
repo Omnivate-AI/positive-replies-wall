@@ -2,8 +2,10 @@
 
 **Severity:** Medium
 **Priority:** P2
-**Status:** Open
+**Status:** Closed
 **Area:** `lib/sdr.ts`, `trigger/lib/classify.ts`, `trigger/lib/mappers.ts`
+
+**Resolution:** `lib/sdr.ts` is now the single source of truth. `trigger/lib/classify.ts` imports + re-exports `SDR_FIRST_NAMES` (the re-export keeps existing import paths working — the classifier prompt assembly + tests + scripts that imported from there don't need to change). `trigger/lib/mappers.ts` imports the canonical list and derives `SDR_FIRST_NAMES_LOWER` at module load via `.map((n) => n.toLowerCase())` — no second list to drift. Updated docstring on `lib/sdr.ts` flags it as "SINGLE SOURCE OF TRUTH" and tells future editors to add/remove SDRs in one file. New unit test in `tests/unit/mappers.test.ts` iterates over `SDR_FIRST_NAMES` and asserts each name is skipped by `redactionsFromLead` — guards against future drift.
 
 **Problem**
 The SDR allowlist (`["Christie", "Andrew", "James", "Josh", "Omar"]`) is defined three times in three places, each with a comment telling future readers to keep them in sync manually:

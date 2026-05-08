@@ -5,6 +5,7 @@ import {
   redactionsFromLead,
   type MatchedLead,
 } from "../../trigger/lib/mappers.js";
+import { SDR_FIRST_NAMES } from "../../lib/sdr.js";
 import {
   fixtureCampaign,
   fixtureClient,
@@ -199,6 +200,29 @@ describe("redactionsFromLead", () => {
       matchedLead: null,
     });
     expect(out).toEqual([{ text: "mrichards@heru.net", match_type: "literal" }]);
+  });
+
+  it("the SDR allowlist comes from the canonical lib/sdr source — every SDR name is skipped", () => {
+    // Any drift between mappers.ts's SDR detection and the canonical list
+    // would surface here. With single-source-of-truth in lib/sdr.ts, adding
+    // a new SDR there is automatically picked up by mappers.ts.
+    for (const sdrName of SDR_FIRST_NAMES) {
+      const out = redactionsFromLead({
+        leadEntry: {
+          ...fixtureLeadEntry,
+          lead: {
+            ...fixtureLeadEntry.lead,
+            first_name: sdrName,
+            last_name: "Lastname",
+            company_name: "ACME",
+          },
+        },
+        matchedLead: null,
+      });
+      // SDR first name skipped; last name + company + email pass through.
+      expect(out.find((r) => r.text === sdrName)).toBeUndefined();
+      expect(out.find((r) => r.text === "Lastname")).toBeDefined();
+    }
   });
 
   it("multi-token company names get literal match_type", () => {

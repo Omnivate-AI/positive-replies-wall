@@ -46,8 +46,11 @@ export const CATEGORY_ENUM = [
 ] as const;
 export type Category = (typeof CATEGORY_ENUM)[number];
 
-/** SDR first names — kept unredacted by default per M4 redaction policy. */
-export const SDR_FIRST_NAMES = ["Christie", "Andrew", "James", "Josh", "Omar"];
+/** SDR first names — single-sourced from `lib/sdr.ts`. Re-exported here
+ * because the classifier prompt template uses it at runtime, and the
+ * re-export keeps existing import paths working. */
+import { SDR_FIRST_NAMES } from "../../lib/sdr.js";
+export { SDR_FIRST_NAMES };
 
 /** Threshold from M4: total >= 55 is publish-worthy. */
 export const HIGH_QUALITY_THRESHOLD = 55;

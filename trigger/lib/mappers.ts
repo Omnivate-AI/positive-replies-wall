@@ -141,13 +141,13 @@ export function toMessageInsert(threadId: number, msg: SLMessage): MessageInsert
  * Skips strings that match an SDR first name (Christie/Andrew/James/Josh/Omar)
  * because those are kept unredacted by M4 redaction policy.
  */
-const SDR_FIRST_NAMES_LOWER = new Set([
-  "christie",
-  "andrew",
-  "james",
-  "josh",
-  "omar",
-]);
+import { SDR_FIRST_NAMES } from "../../lib/sdr.js";
+
+/** Lower-cased mirror of the canonical allowlist for case-insensitive
+ * lookups. Derived at module load — there's no second source to drift. */
+const SDR_FIRST_NAMES_LOWER = new Set(
+  SDR_FIRST_NAMES.map((n) => n.toLowerCase()),
+);
 
 /** Decide match_type for an auto-seeded redaction. Single-token strings
  * (no whitespace, no `@`, no `.`) become `word_boundary` so a short name
