@@ -2,7 +2,7 @@
 
 A public landing page that displays Omnivate's best positive cold-outbound replies — automatically captured from Smartlead, AI-classified for quality, and rendered as a wall of email reply cards with span-level redaction support.
 
-[Strategy brief](brief.md) · Live: https://positive-repies-wall.vercel.app · [Coming-soon preview](https://positive-repies-wall.vercel.app/coming-soon) · [POC viewer](https://positive-repies-wall.vercel.app/m7/pocs) · [Audit quiz](https://positive-repies-wall.vercel.app/m7/quiz)
+[Strategy brief](brief.md) · [Project report](report.md) · [QA tickets](qa-tickets/) · Live: https://positive-repies-wall.vercel.app · Admin: https://positive-repies-wall.vercel.app/admin
 
 ---
 
@@ -29,39 +29,69 @@ Omnivate runs AI-driven outbound campaigns for B2B clients. Across thousands of 
 
 ```
 .
-├── app/                       Next.js App Router routes
-│   ├── page.tsx               Home (M7 hub: POC viewer + audit quiz + coming-soon preview)
-│   ├── coming-soon/           M8 placeholder with live reply count
-│   ├── m7/
-│   │   ├── pocs/              Three rendering POCs side-by-side (M7)
-│   │   ├── quiz/              Classifier audit quiz (M6 #4)
-│   │   └── data/              Hardcoded fixtures (poc-samples.ts, quiz.ts)
+├── app/                              Next.js App Router
+│   ├── page.tsx                      Public wall (ISR=60). Reads getPublishedWallThreads.
+│   ├── layout.tsx                    Root metadata + Google Sans <link>
+│   ├── error.tsx                     Global error boundary; emits event=page_render_failed
+│   ├── globals.css                   Tailwind v4 tokens + redaction styles
+│   ├── icon.ico
+│   ├── admin/
+│   │   ├── page.tsx                  Server-rendered admin shell
+│   │   └── dashboard.tsx             Client triage UI (filter / preview / mutate)
+│   ├── auth/
+│   │   ├── page.tsx                  Sign-in placeholder (visual only — see m10 doc)
+│   │   └── login-form.tsx            Client form (no-op submit; auth deferred to main-app integration)
 │   └── api/
-│       └── og-reply/          Option C — Satori-rendered email card as PNG
+│       └── admin/
+│           ├── publish/route.ts      POST is_published / display_priority
+│           ├── redactions/route.ts   POST + DELETE (admin-source only)
+│           ├── highlights/route.ts   POST + DELETE (admin-source only)
+│           └── revalidate/route.ts   POST revalidatePath('/')
 ├── components/
-│   └── email-reply-card.tsx   The shared code-rendered email card (M7 Option B; the M9 wall renders this)
-├── trigger/                   Trigger.dev tasks
+│   ├── email-reply-card.tsx          Shared code-rendered email card; renders the wall + admin preview
+│   └── wall-grid.tsx                 Public wall column layout + client-side "show more" reveal
+├── lib/                              Server-side utilities
+│   ├── supabase-public.ts            Anon-key client + queries (wall, admin, stats)
+│   ├── supabase-admin.ts             Service-role client (admin API mutations only)
+│   ├── redactions.tsx                applyRedactions + inferMatchType (literal vs word_boundary)
+│   ├── excerpt.ts                    Body truncation around the anchor highlight
+│   └── sdr.ts                        SDR first-name allowlist (defense-in-depth redaction set)
+├── trigger/                          Trigger.dev tasks
 │   ├── ingest-smartlead-replies.ts
 │   ├── classify-replies.ts
-│   ├── lib/                   smartlead.ts, classify.ts, classify-batch.ts, openrouter.ts, retry.ts, supabase.ts, mappers.ts, ingest.ts
+│   ├── scheduled-ingest-and-classify.ts  Daily wrapper (ingest → classify)
+│   ├── lib/                          smartlead, classify, classify-batch, openrouter, retry, supabase, mappers, ingest, lead-lookup
 │   └── prompts/
-│       └── classify-reply.md  The classifier prompt — externalised so non-engineers can iterate
-├── migrations/                Supabase schema migrations (001 = prw_* tables, 002 = cleaned_reply_text column)
-├── scripts/                   Local CLI runners
-│   ├── ingest-local.ts        Pull positive replies from Smartlead → Supabase
-│   ├── classify-local.ts      Score unclassified replies via OpenRouter
-│   ├── run-calibration.ts     M4 exemplars + junk control test against the prompt
-│   └── test-deployment.ts     Smoke-test deployed Trigger.dev tasks
-├── tests/                     Vitest — 108 tests across unit / integration / e2e / smoke
-│   └── _helpers/              Fixtures (M2 Smartlead + M4 exemplars + junk replies)
-├── docs/                      Per-milestone deliverables (m1 through m8)
-│   └── m4-exemplars/          Original Omar-flagged screenshots (Option A reference)
-├── public/m7/                 Sample exemplar PNGs served by the POC viewer
-├── trigger.config.ts          Trigger.dev project config
-├── next.config.ts             Next.js config
-├── postcss.config.mjs         Tailwind v4 PostCSS plugin
-├── eslint.config.mjs          ESLint flat config (v9)
-└── brief.md                   The original 11-mini-project project brief from Omar
+│       └── classify-reply.md         The classifier prompt — externalised so non-engineers can iterate
+├── migrations/                       Supabase schema migrations
+│   ├── 001-positive-replies.sql      prw_* tables
+│   ├── 002-classifier-cleaned-reply.sql
+│   ├── 003-restructure-threads.sql   prw_threads + prw_messages restructure
+│   ├── 004-prw-highlights.sql        Multi-highlight schema
+│   └── 005-redaction-word-boundary.sql  Backfill match_type for auto_lead rows
+├── scripts/                          Local CLI runners
+│   ├── ingest-local.ts               Pull positive replies from Smartlead → Supabase
+│   ├── classify-local.ts             Score unclassified replies via OpenRouter
+│   ├── run-calibration.ts            M4 exemplars + junk control test against the prompt
+│   ├── apply-migration.ts            Apply a migration file to the linked Supabase project
+│   ├── test-deployment.ts            Smoke-test deployed Trigger.dev tasks
+│   └── trigger-wrapper.ts            CLI helper for running a Trigger task locally
+├── tests/                            Vitest suites — unit / integration / e2e / smoke (148 tests)
+│   └── _helpers/                     Fixtures (M2 Smartlead + M4 exemplars + junk replies)
+├── qa-tickets/                       Structured findings from the QA reviewer agent
+├── docs/                             Per-milestone deliverables (m1 through m11) + the M11 runbook
+│   └── m4-exemplars/                 Original Omar-flagged screenshots (Option A reference)
+├── .claude/
+│   ├── agents/qa-reviewer.md         Senior QA reviewer agent
+│   └── skills/frontend-engineer/     Frontend discipline skill (auto-activates on FE work)
+├── trigger.config.ts                 Trigger.dev project config
+├── next.config.ts                    Next.js config + image remotePatterns
+├── postcss.config.mjs                Tailwind v4 PostCSS plugin
+├── eslint.config.mjs                 ESLint flat config (v9) — full source tree linted
+├── vitest.config.ts                  Vitest config
+├── tsconfig.json                     TypeScript strict mode + `@/*` paths
+├── brief.md                          The original 11-mini-project project brief from Omar
+└── report.md                         Project report — what we built, lessons, plan
 ```
 
 ## Local development

@@ -1,5 +1,5 @@
 /**
- * EmailReplyCard — code-rendered email recreation (M7 Option B).
+ * EmailReplyCard — code-rendered email recreation (M7 Option B picked).
  *
  * Layout (matches the screenshot pattern Omar approved):
  *   [Subject — large]
@@ -9,9 +9,8 @@
  *   Body, line-break-preserving
  *
  * Used by:
- *   - /m7/pocs Option B (full card with redaction toggle)
- *   - /api/og-reply (Option C captures this same component to PNG via @vercel/og)
- *   - /m7/quiz via the exported <ReplyBody> sub-component (body-only mode)
+ *   - components/wall-grid.tsx — public wall card render
+ *   - app/admin/dashboard.tsx — admin preview pane
  */
 
 import { Fragment, type ReactNode } from "react";

@@ -104,9 +104,11 @@ export interface WallThread {
   total_score: number;
 }
 
-/** Fetch the top N high-quality threads at the latest prompt version, with
- * everything needed to render a WallReplyCard. Used by /demo and (later) by
- * the public wall in M10. */
+/** Fetch the top N high-quality threads at the current PROMPT_VERSION, with
+ * everything needed to render an EmailReplyCard. Retained for ad-hoc scripts
+ * that need a "score-ranked" view. The public wall uses
+ * `getPublishedWallThreads()` instead, which filters on the published flag
+ * and sorts by display priority + recency. */
 export async function getWallThreads(limit = 10): Promise<WallThread[]> {
   const sb = getClient();
 

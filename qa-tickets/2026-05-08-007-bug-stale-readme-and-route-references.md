@@ -2,8 +2,18 @@
 
 **Severity:** Medium
 **Priority:** P2
-**Status:** Open
+**Status:** Closed
 **Area:** `README.md`, `components/email-reply-card.tsx`, `lib/supabase-public.ts`, `app/layout.tsx`
+
+**Resolution:** Stale references swept across all four areas.
+
+- `README.md` — top intro now links to `brief.md`, `report.md`, `qa-tickets/`, the live wall, and the admin URL. Dead `/coming-soon`, `/m7/pocs`, `/m7/quiz` links removed. `## Repo layout` rewritten to match the actual `app/` tree (admin/, auth/, api/admin/*, error.tsx, no M7 routes, no /api/og-reply) and includes the new directories that landed in M10–M11 + the QA refactor (qa-tickets/, .claude/, migration 005, etc.).
+- `components/email-reply-card.tsx` docstring — `Used by:` block points at the real call sites (`components/wall-grid.tsx` and `app/admin/dashboard.tsx`) instead of the removed M7 routes.
+- `lib/supabase-public.ts` `getWallThreads` docstring — describes its actual purpose (score-ranked ad-hoc view) and points readers at `getPublishedWallThreads()` for the production wall path.
+- `package.json` — `@vercel/og` removed (`npm uninstall`); no source file imports it. Dependency cruft eliminated.
+- `app/layout.tsx` metadata.description was already updated in Batch 2 (ticket #003).
+
+Diagnostics: typecheck pass, lint pass, 148/148 tests pass.
 
 **Problem**
 The README and several source-file docstrings describe routes and structure that no longer exist. New contributors reading them will be sent on multiple wild-goose chases.
