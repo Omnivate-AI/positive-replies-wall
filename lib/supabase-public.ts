@@ -12,7 +12,11 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import ws from "ws";
-import { PROMPT_VERSION } from "@/trigger/lib/classify";
+// Importing PROMPT_VERSION from `lib/prompt-version` (a leaf module with no
+// Trigger.dev / OpenRouter / Supabase service-role dependencies) avoids
+// pulling the Trigger.dev runtime path through Next.js's bundler, which
+// can't resolve the `.js`-extension imports used in `trigger/lib/`.
+import { PROMPT_VERSION } from "./prompt-version";
 import { SDR_FIRST_NAMES } from "./sdr";
 
 /** Cap on rows returned by getPublishedWallThreads — defensive ceiling against

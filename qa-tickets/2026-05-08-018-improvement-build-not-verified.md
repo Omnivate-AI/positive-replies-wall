@@ -2,8 +2,20 @@
 
 **Severity:** Low
 **Priority:** P3
-**Status:** Open
+**Status:** Closed
 **Area:** CI / build pipeline
+
+**Resolution:** `npm run build` was run and surfaced a real production bug introduced by Batch 3's `import { PROMPT_VERSION } from "@/trigger/lib/classify"` in `lib/supabase-public.ts`. Pulling the Trigger.dev runtime path through Next.js's bundler hit module-resolution failures on the `.js`-extension imports inside `trigger/lib/` (`./openrouter.js`, `./classify-batch.js`, etc.) — Next's bundler doesn't follow the explicit-extension ESM convention that Trigger.dev uses.
+
+Fix: extracted `PROMPT_VERSION` to a leaf module `lib/prompt-version.ts` (no Trigger.dev / OpenRouter / Supabase service-role dependencies). Both `trigger/lib/classify.ts` and `lib/supabase-public.ts` now import from there. `trigger/lib/classify.ts` re-exports `PROMPT_VERSION` so existing call sites elsewhere in `trigger/lib/*` and `tests/` keep working without import-path changes. Same single-source pattern as `lib/sdr.ts:SDR_FIRST_NAMES`.
+
+Final verification matrix:
+- `npm run typecheck` — pass.
+- `npm run lint` — pass (full source tree, including the directories Batch 1 unblocked).
+- `npm test -- --run` — 172/172 tests pass across 15 files (unit / integration / e2e / smoke).
+- `npm run build` — pass. All 9 routes resolved. ISR + dynamic markings correct: `/` static (revalidate=1m), `/admin`, `/auth`, `/api/admin/*` dynamic.
+
+The build verification was the load-bearing closure for this batch — it caught a real bug the test suite couldn't have caught (vitest doesn't go through Next.js's bundler).
 
 **Problem**
 This audit ran `npm run typecheck`, `npm run lint`, and `npm test` (all passed). It did **not** run `npm run build` because the audit runs in a sandboxed environment with constrained execution time.

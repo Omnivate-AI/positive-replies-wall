@@ -15,8 +15,10 @@ import { dirname, resolve } from "path";
 import { chatJson, type ChatMessage } from "./openrouter.js";
 
 /**
- * Bump this when the prompt content changes. Bumping triggers a re-classification
- * of every thread on the next batch run because of UNIQUE(thread_id, prompt_version).
+ * Classifier prompt version — single-sourced from `lib/prompt-version.ts`.
+ * Re-exported so existing call sites here in trigger/lib/* keep working.
+ *
+ * Version log (the canonical declaration lives in lib/prompt-version.ts):
  *
  * v2.0: thread+messages restructure. Output adds `suggested_highlight_text`
  * (the killer phrase shown on the public wall) and `suggested_redactions`
@@ -34,7 +36,8 @@ import { chatJson, type ChatMessage } from "./openrouter.js";
  * stripped, UTF-8 mojibake normalized). Quiz + wall render this saved cleaned
  * text so the human reads exactly what the AI scored.
  */
-export const PROMPT_VERSION = "v2.0";
+import { PROMPT_VERSION } from "../../lib/prompt-version.js";
+export { PROMPT_VERSION };
 
 /** M4 categories, mirrored as a Zod enum so the model's output is validated. */
 export const CATEGORY_ENUM = [
