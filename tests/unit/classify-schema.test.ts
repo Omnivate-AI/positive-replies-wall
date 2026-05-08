@@ -107,7 +107,7 @@ describe("normalizeEncoding()", () => {
   // Mojibake-byte cheat sheet (Unicode escapes used so source files stay clean):
   //   â = â    € = €    ” = "    “ = "
   //   ’ = '   ‘ = '    … = …    Â = Â
-  //   ã = Ã   © = ©      = NBSP
+  //   ã = Ã   © = ©    \u00A0 = NBSP
 
   it("fixes em-dash mojibake (â€” → —)", () => {
     expect(normalizeEncoding("Thanks Andrew â€” I have completed!"))

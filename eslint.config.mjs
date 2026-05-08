@@ -4,10 +4,11 @@ import tseslint from "typescript-eslint";
 
 /**
  * Flat ESLint config (ESLint v9+).
- * Stack:
- *   - @eslint/js recommended (general JS)
- *   - typescript-eslint recommended (TS-specific)
- *   - eslint-config-next (Next.js + React + a11y)
+ *
+ * Lint scope: the entire source tree. Build artefacts and generated
+ * Next.js types are the only ignores — everything else (including
+ * Trigger.dev tasks, CLI scripts, and tests) is linted, with
+ * directory-specific rule relaxations applied via overrides below.
  *
  * Run: npm run lint
  */
@@ -22,23 +23,23 @@ const config = [
       ".trigger/**",
       "dist/**",
       "next-env.d.ts",
-      // Generated fixture; mojibake intentional in JSON-encoded body strings
-      "app/m7/data/quiz.ts",
-      // Keep ESLint focused on the runtime app/components — Trigger task code,
-      // tests, and scripts have their own static checks via `tsc --noEmit`
-      // and vitest. Adding them here just adds noise.
-      "trigger/**",
-      "scripts/**",
-      "tests/**",
-      "vitest.config.ts",
-      "trigger.config.ts",
     ],
   },
+  // Trigger.dev tasks and CLI scripts are server-side; console output is the
+  // legitimate channel for run logs and operator output.
   {
+    files: ["trigger/**/*.ts", "scripts/**/*.ts"],
     rules: {
-      // The Tailwind v4 stylelint hints (e.g. `bg-(--color-bg)` shorthand) come
-      // from the IDE's tailwindcss-language-server, not ESLint. We've already
-      // converted those by hand. ESLint here covers TS + React + Next.js.
+      "no-console": "off",
+    },
+  },
+  // Tests are allowed looser typing for mocks and console output for diagnostic
+  // logging during failures.
+  {
+    files: ["tests/**/*.{ts,tsx}"],
+    rules: {
+      "no-console": "off",
+      "@typescript-eslint/no-explicit-any": "off",
     },
   },
 ];

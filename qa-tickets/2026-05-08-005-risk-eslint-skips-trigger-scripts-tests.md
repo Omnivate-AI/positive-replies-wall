@@ -2,8 +2,10 @@
 
 **Severity:** High
 **Priority:** P1
-**Status:** Open
+**Status:** Closed
 **Area:** `eslint.config.mjs`
+
+**Resolution:** `eslint.config.mjs` rewritten to lint the full source tree. `trigger/`, `scripts/`, and `tests/` directories removed from the ignores list; dangling `app/m7/data/quiz.ts` reference removed. Added flat-config overrides for `trigger/**` + `scripts/**` (allow `no-console`) and `tests/**` (allow `no-console` + `@typescript-eslint/no-explicit-any`). Surfaced 5 preexisting violations, fixed in the same commit: 2× `any` in `scripts/run-calibration.ts` typed against `ClassifyInput` from `trigger/lib/classify.ts`; 3× `no-irregular-whitespace` (literal NBSP characters in mojibake-detection regexes in `trigger/lib/classify.ts:126,134` and a comment in `tests/unit/classify-schema.test.ts:110`) replaced with explicit ` ` escapes — semantics preserved (verified by full test suite, 138/138 passing). CI gating to come with Batch 7. Closed in this batch.
 
 **Problem**
 `eslint.config.mjs:18-35` ignores most of the source tree from lint:

@@ -15,7 +15,7 @@
 import * as dotenv from "dotenv";
 dotenv.config();
 
-import { classifyReply } from "../trigger/lib/classify.js";
+import { classifyReply, type ClassifyInput } from "../trigger/lib/classify.js";
 import { M4_EXEMPLARS, JUNK_REPLIES } from "../tests/_helpers/m4-exemplars.js";
 
 interface Row {
@@ -33,7 +33,7 @@ interface Row {
   error?: string;
 }
 
-async function classifyOne(label: string, input: any, expected: boolean): Promise<Row> {
+async function classifyOne(label: string, input: ClassifyInput, expected: boolean): Promise<Row> {
   try {
     const r = await classifyReply(input);
     const total = r.praise_score + r.specificity_score + r.authenticity_score + r.standalone_score;
@@ -77,7 +77,7 @@ async function main() {
 
   // Concurrency 5 — same as the batch runner. Keeps the calibration fast (~2 min).
   const concurrency = 5;
-  const all: Array<{ label: string; input: any; expected: boolean }> = [
+  const all: Array<{ label: string; input: ClassifyInput; expected: boolean }> = [
     ...M4_EXEMPLARS.map((e) => ({ label: `M4 ${e.file}`, input: e, expected: true })),
     ...JUNK_REPLIES.map((j, i) => ({ label: `JUNK ${i + 1}`, input: j, expected: false })),
   ];

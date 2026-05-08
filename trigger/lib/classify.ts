@@ -123,7 +123,7 @@ export function normalizeEncoding(text: string): string {
       // catch-all for any remaining "â€<x>" pattern → assume em dash
       .replace(/â€./g, "—")
       // double-encoded NBSP — most often spurious next to spaces/periods
-      .replace(/Â /g, " ")
+      .replace(/Â\u00A0/g, " ")
       .replace(/(?<=\w)Â/g, "") // stray Â glued to end of a word
       .replace(/(?<=[!?.,;:)\]'"])Â/g, "") // Â immediately after punctuation
       .replace(/^Â+/gm, "") // stray Â at line start
@@ -131,7 +131,7 @@ export function normalizeEncoding(text: string): string {
       // accented Latin (UTF-8 bytes for é/è/etc. read as 1252)
       .replace(/Ã©/g, "é")
       .replace(/Ã¨/g, "è")
-      .replace(/Ã /g, "à") // Ã + NBSP (real mojibake form: UTF-8 byte A0 = NBSP in CP1252)
+      .replace(/Ã\u00A0/g, "à") // Ã + NBSP (real mojibake form: UTF-8 byte A0 = NBSP in CP1252)
       .replace(/Ã¢/g, "â")
       .replace(/Ã¡/g, "á")
       .replace(/Ã­/g, "í")
