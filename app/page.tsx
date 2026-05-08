@@ -68,53 +68,32 @@ export default async function HomePage() {
       </div>
 
       {/* ───── Hero ───── */}
-      {/* Hero image removed — the headline panel now reads cleanly on the
-       * page background without the Unsplash backdrop. Section keeps its
-       * vertical breathing room via the inner padding. */}
+      {/* Single centered text block — eyebrow / h1 / description. No
+       * frosted-glass panel (it existed to sit on top of the now-removed
+       * Unsplash image; on a clean bg it reads as visual noise). No
+       * in-hero CTA — the footer band carries the only "Book a call".
+       * Tight vertical padding so the first row of cards lands above
+       * the fold on a typical 1080p viewport. */}
       <section>
-        <div className="w-full px-6 py-28 sm:px-8 sm:py-36 lg:px-16 lg:py-44">
-          <div className="mx-auto max-w-3xl rounded-card bg-surface/80 p-10 text-center shadow-card-hover backdrop-blur-md sm:p-12">
+        <div className="w-full px-6 py-12 sm:px-8 sm:py-16 lg:px-16 lg:py-20">
+          <div className="mx-auto max-w-7xl text-center">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
               Wall of replies
             </p>
             <h1 className="mt-5 text-4xl font-semibold tracking-tight text-fg sm:text-5xl lg:text-[56px] lg:leading-[1.05]">
               What real prospects said when we cold-emailed them.
             </h1>
-            <p className="mx-auto mt-6 max-w-xl text-base leading-relaxed text-fg-muted sm:text-lg">
-              Verbatim quotes from B2B execs, pulled live from our outbound
-              inboxes. Names redacted. Praise unedited.
+            <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-fg-muted sm:text-lg">
+              Every reply on this page is a real B2B prospect responding to a
+              cold email we sent on behalf of an Omnivate client. Names are
+              blurred; everything else is verbatim.
             </p>
-            <div className="mt-10 flex items-center justify-center gap-3">
-              <a
-                href={BOOK_CALL_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-button bg-accent px-6 py-3 text-sm font-medium text-white shadow-button transition-all hover:-translate-y-0.5 hover:bg-accent-hover hover:shadow-card-hover"
-              >
-                Book a call
-                <Chevron />
-              </a>
-            </div>
           </div>
         </div>
       </section>
 
-      {/* ───── Section heading ───── */}
-      <section className="w-full px-6 pt-20 sm:px-8 lg:px-16">
-        <div className="mx-auto max-w-3xl text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">
-            The wall
-          </p>
-          <p className="mt-4 text-base leading-relaxed text-fg-muted">
-            Every reply on this page is a real B2B prospect responding to a cold
-            email we sent on behalf of an Omnivate client. Names are
-            black-barred; everything else is verbatim.
-          </p>
-        </div>
-      </section>
-
       {/* ───── Wall grid ───── */}
-      <section className="w-full px-6 pt-12 pb-24 sm:px-8 sm:pb-32 lg:px-16">
+      <section className="w-full px-6 pt-4 pb-24 sm:px-8 sm:pb-32 lg:px-16">
         {threads.length === 0 ? (
           loadError ? (
             <div

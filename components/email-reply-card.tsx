@@ -204,7 +204,9 @@ export function EmailReplyCard({
        * bracket-wrapped variant added to the redaction set so the
        * longest-first matcher captures the whole `<email>` block) — that
        * way the angle brackets don't render as visible plain text outside
-       * the redaction. */}
+       * the redaction. The new brand-color redaction pill is sized to
+       * match the old black-bar's width (same padding, no extra margin),
+       * so `truncate` here behaves like it always did. */}
       <div className="mt-4 flex items-baseline justify-between gap-3">
         <div className="min-w-0 flex-1 truncate text-sm text-fg redaction-transition">
           <span className="font-medium text-fg-muted">

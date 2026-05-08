@@ -125,10 +125,21 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
 
   const selected = threads.find((t) => t.thread_id === selectedId) ?? null;
 
-  // All admin mutations live in TanStack Query hooks — see
-  // app/admin/_hooks/use-admin-mutations. The hooks own optimistic-update
-  // + rollback semantics, so this component just calls .mutate(args).
+  // Admin mutations live in TanStack Query hooks — see
+  // app/admin/_hooks/use-admin-mutations. Each handler below reads the
+  // state it needs SYNCHRONOUSLY from the `threads` closure and passes it
+  // through as args to `mutate(...)`. The hooks no longer rely on
+  // closure-capture inside `setThreads(prev => ...)` updaters — which was
+  // the lesson-2.5 React-19-concurrent-mode bug that re-emerged in
+  // Batch 5. Reading via the parent closure is the project report's
+  // documented fix.
   const mutations = useAdminMutations(setThreads, setError);
+
+  // Stable temp-id allocator. Negative so it can never collide with a
+  // real DB id. Microsecond-granular plus a random tail to avoid
+  // collisions when handlers fire in the same millisecond.
+  const newTempId = (): number =>
+    -(Date.now() * 1000 + Math.floor(Math.random() * 1000));
 
   function togglePublished(threadId: number) {
     const current = threads.find((t) => t.thread_id === threadId);
@@ -136,29 +147,64 @@ export function AdminDashboard({ initialThreads, adminEmail }: Props) {
     mutations.togglePublished.mutate({
       threadId,
       nextValue: !current.is_published,
+      prevValue: current.is_published,
     });
   }
 
   function setPriority(threadId: number, value: number) {
-    mutations.setPriority.mutate({ threadId, value });
+    const current = threads.find((t) => t.thread_id === threadId);
+    if (!current) return;
+    if (value === current.display_priority) return;
+    mutations.setPriority.mutate({
+      threadId,
+      value,
+      prevValue: current.display_priority,
+    });
   }
 
   function addRedaction(threadId: number, text: string) {
-    if (text.trim().length < 2) return;
-    mutations.addRedaction.mutate({ threadId, text });
+    const trimmed = text.trim();
+    if (trimmed.length < 2) return;
+    const current = threads.find((t) => t.thread_id === threadId);
+    if (!current) return;
+    // Skip duplicates synchronously (the hook no longer does the dupe
+    // check internally — running it inside a setThreads updater is the
+    // very pattern that fails under React 19).
+    if (current.redactions.some((r) => r.text === trimmed)) return;
+    mutations.addRedaction.mutate({
+      threadId,
+      text: trimmed,
+      tempId: newTempId(),
+    });
   }
 
   function removeRedaction(threadId: number, redactionId: number) {
-    mutations.removeRedaction.mutate({ threadId, redactionId });
+    if (redactionId < 0) return; // refuse to delete tempIds — not persisted
+    const current = threads.find((t) => t.thread_id === threadId);
+    const target = current?.redactions.find((r) => r.id === redactionId);
+    if (!target || target.source !== "admin") return;
+    mutations.removeRedaction.mutate({ threadId, redactionId, target });
   }
 
   function addHighlight(threadId: number, text: string) {
-    if (text.trim().length < 2) return;
-    mutations.addHighlight.mutate({ threadId, text });
+    const trimmed = text.trim();
+    if (trimmed.length < 2) return;
+    const current = threads.find((t) => t.thread_id === threadId);
+    if (!current) return;
+    if (current.highlights.some((h) => h.text === trimmed)) return;
+    mutations.addHighlight.mutate({
+      threadId,
+      text: trimmed,
+      tempId: newTempId(),
+    });
   }
 
   function removeHighlight(threadId: number, highlightId: number) {
-    mutations.removeHighlight.mutate({ threadId, highlightId });
+    if (highlightId < 0) return;
+    const current = threads.find((t) => t.thread_id === threadId);
+    const target = current?.highlights.find((h) => h.id === highlightId);
+    if (!target || target.source !== "admin") return;
+    mutations.removeHighlight.mutate({ threadId, highlightId, target });
   }
 
   /** mouseUp inside the preview pane → capture the current text selection

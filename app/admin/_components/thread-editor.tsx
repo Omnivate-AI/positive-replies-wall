@@ -10,6 +10,7 @@
 import { useMemo, useState } from "react";
 import { EmailReplyCard } from "@/components/email-reply-card";
 import { buildExcerpt, pickAnchorHighlight } from "@/lib/excerpt";
+import { inferMatchType, type RedactionEntry } from "@/lib/redactions";
 import { SDR_FIRST_NAMES } from "@/lib/sdr";
 import type { AdminThread } from "@/lib/supabase-public";
 import { CloseIcon } from "./icons";
@@ -61,13 +62,30 @@ export function ThreadEditor({
   // Render redactions = stored redactions + SDR allowlist + sender identity
   // (display name + email — defense in depth, never trust the auto_lead
   // row to be present) + recipient SDR mailbox.
-  const allRedactions = useMemo(() => {
-    const set = new Set(thread.redactions.map((r) => r.text));
-    for (const n of SDR_FIRST_NAMES) set.add(n);
-    if (thread.from_display_name) set.add(thread.from_display_name);
-    if (thread.from_email) set.add(thread.from_email);
-    if (thread.to_email) set.add(thread.to_email);
-    return Array.from(set);
+  // Each entry preserves its `match_type` so the renderer routes literal
+  // vs word_boundary correctly. The previous version converted to a
+  // `Set<string>` which dropped match_type — every entry then defaulted
+  // to literal substring match, undoing the word_boundary fix from
+  // ticket #013 in this preview pane only (the public wall was correct).
+  const allRedactions = useMemo<RedactionEntry[]>(() => {
+    const seen = new Set<string>();
+    const out: RedactionEntry[] = [];
+    const push = (
+      text: string | null | undefined,
+      match: RedactionEntry["match_type"],
+    ): void => {
+      if (!text) return;
+      const key = `${match}|${text.toLowerCase()}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({ text, match_type: match });
+    };
+    for (const r of thread.redactions) push(r.text, r.match_type);
+    for (const n of SDR_FIRST_NAMES) push(n, "word_boundary");
+    push(thread.from_display_name, inferMatchType(thread.from_display_name ?? ""));
+    push(thread.from_email, "literal");
+    push(thread.to_email, "literal");
+    return out;
   }, [thread.redactions, thread.from_display_name, thread.from_email, thread.to_email]);
 
   return (

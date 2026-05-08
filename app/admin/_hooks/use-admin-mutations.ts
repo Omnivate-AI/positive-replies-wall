@@ -2,19 +2,32 @@
 
 /**
  * Admin mutation hooks — six TanStack Query `useMutation` calls covering
- * publish/priority/redaction/highlight CRUD. Each owns its lifecycle:
- *   - mutationFn: hits /api/admin/* and follows up with revalidate.
- *   - onMutate: optimistically updates local thread state, returns context
- *     (snapshot or temp id) for rollback.
- *   - onError: rolls back using the context.
- *   - onSuccess: reconciles the local state with the server response
- *     (replaces a temp id with the real one, etc.).
+ * publish/priority/redaction/highlight CRUD.
  *
- * Why not a `useQuery` for threads? The threads list is server-rendered in
- * `app/admin/page.tsx` (force-dynamic) and passed as `initialThreads`. The
- * mutations modify the local state directly. Moving the source of truth
- * into the QueryClient is a follow-up that lands when the main-app
- * integration introduces auth and we restructure for shared state.
+ * Architectural note (lesson 2.5 from report.md, re-applied 2026-05-08):
+ * each hook receives all state it needs (prevValue / target / tempId)
+ * via `mutate({...})` args. The caller (dashboard.tsx) reads the current
+ * `threads` closure SYNCHRONOUSLY in the click handler and passes through.
+ * This avoids the React-19-concurrent-mode footgun where reading state
+ * inside a `setThreads(prev => …)` updater is deferred until render —
+ * `let target = …; setThreads(prev => { target = …; return … });
+ * return { target };` returns `target` undefined because the updater
+ * runs LATER, not during the setState call.
+ *
+ * Lifecycle:
+ *   - mutationFn: hits /api/admin/* and follows up with revalidate.
+ *   - onMutate: optimistic forward update only (writes to local state).
+ *   - onSuccess: reconciles local state with the server response (e.g.
+ *     replace tempId with the real DB id).
+ *   - onError: rolls back using the args passed to mutate (NOT a
+ *     captured-from-updater context).
+ *
+ * Why no useQuery for threads: the threads list is server-rendered in
+ * `app/admin/page.tsx` (force-dynamic) and passed as `initialThreads`.
+ * Local-state mutation through useState + functional patches is
+ * sufficient. Moving the source of truth into the QueryClient is a
+ * follow-up that can land alongside the main-app integration's auth
+ * model.
  */
 
 import { useMutation } from "@tanstack/react-query";
@@ -25,14 +38,14 @@ export type SetThreadsFn = (
 ) => void;
 export type SetErrorFn = (err: string | null) => void;
 
-interface AdminRedaction {
+export interface AdminRedaction {
   id: number;
   text: string;
   source: string;
   match_type: RedactionMatchType;
 }
 
-interface AdminHighlight {
+export interface AdminHighlight {
   id: number;
   text: string;
   source: string;
@@ -55,16 +68,13 @@ async function api(path: string, init: RequestInit): Promise<Response> {
 
 async function revalidate(): Promise<void> {
   // Best-effort — a failed revalidate doesn't fail the mutation. The next
-  // ISR cycle (60s) will pick the changes up regardless.
+  // ISR cycle (60s) picks the changes up regardless.
   try {
     await api("/api/admin/revalidate", { method: "POST" });
   } catch {
     /* swallow */
   }
 }
-
-const tempId = (): number =>
-  -(Date.now() * 1000 + Math.floor(Math.random() * 1000));
 
 function patchOne(
   setThreads: SetThreadsFn,
@@ -76,21 +86,20 @@ function patchOne(
 
 // ─── Publish toggle ─────────────────────────────────────────────────────
 
-interface TogglePublishedArgs {
+export interface TogglePublishedArgs {
   threadId: number;
   nextValue: boolean;
+  /** Caller-provided previous value for rollback on error. Read
+   * synchronously in the dashboard handler from the `threads` closure
+   * before calling `mutate(...)`. */
+  prevValue: boolean;
 }
 
 export function useTogglePublished(
   setThreads: SetThreadsFn,
   setError: SetErrorFn,
 ) {
-  return useMutation<
-    void,
-    Error,
-    TogglePublishedArgs,
-    { prevValue: boolean | undefined }
-  >({
+  return useMutation<void, Error, TogglePublishedArgs>({
     mutationFn: async ({ threadId, nextValue }) => {
       await api("/api/admin/publish", {
         method: "POST",
@@ -98,24 +107,11 @@ export function useTogglePublished(
       });
       await revalidate();
     },
-    onMutate: async ({ threadId, nextValue }) => {
-      let prevValue: boolean | undefined;
-      setThreads((prev) => {
-        const target = prev.find((t) => t.thread_id === threadId);
-        prevValue = target?.is_published;
-        return prev.map((t) =>
-          t.thread_id === threadId ? { ...t, is_published: nextValue } : t,
-        );
-      });
-      return { prevValue };
+    onMutate: ({ threadId, nextValue }) => {
+      patchOne(setThreads, threadId, (t) => ({ ...t, is_published: nextValue }));
     },
-    onError: (err, { threadId }, context) => {
-      if (context?.prevValue !== undefined) {
-        patchOne(setThreads, threadId, (t) => ({
-          ...t,
-          is_published: context.prevValue!,
-        }));
-      }
+    onError: (err, { threadId, prevValue }) => {
+      patchOne(setThreads, threadId, (t) => ({ ...t, is_published: prevValue }));
       setError(err.message || "Failed to update publish state");
     },
   });
@@ -123,21 +119,17 @@ export function useTogglePublished(
 
 // ─── Priority ───────────────────────────────────────────────────────────
 
-interface SetPriorityArgs {
+export interface SetPriorityArgs {
   threadId: number;
   value: number;
+  prevValue: number;
 }
 
 export function useSetPriority(
   setThreads: SetThreadsFn,
   setError: SetErrorFn,
 ) {
-  return useMutation<
-    void,
-    Error,
-    SetPriorityArgs,
-    { prevValue: number | undefined }
-  >({
+  return useMutation<void, Error, SetPriorityArgs>({
     mutationFn: async ({ threadId, value }) => {
       await api("/api/admin/publish", {
         method: "POST",
@@ -145,23 +137,14 @@ export function useSetPriority(
       });
       await revalidate();
     },
-    onMutate: async ({ threadId, value }) => {
-      let prevValue: number | undefined;
-      setThreads((prev) => {
-        prevValue = prev.find((t) => t.thread_id === threadId)?.display_priority;
-        return prev.map((t) =>
-          t.thread_id === threadId ? { ...t, display_priority: value } : t,
-        );
-      });
-      return { prevValue };
+    onMutate: ({ threadId, value }) => {
+      patchOne(setThreads, threadId, (t) => ({ ...t, display_priority: value }));
     },
-    onError: (err, { threadId }, context) => {
-      if (context?.prevValue !== undefined) {
-        patchOne(setThreads, threadId, (t) => ({
-          ...t,
-          display_priority: context.prevValue!,
-        }));
-      }
+    onError: (err, { threadId, prevValue }) => {
+      patchOne(setThreads, threadId, (t) => ({
+        ...t,
+        display_priority: prevValue,
+      }));
       setError(err.message || "Failed to update priority");
     },
   });
@@ -169,9 +152,12 @@ export function useSetPriority(
 
 // ─── Add redaction ──────────────────────────────────────────────────────
 
-interface AddRedactionArgs {
+export interface AddRedactionArgs {
   threadId: number;
   text: string;
+  /** Caller-generated negative id used for the optimistic row, then
+   * swapped for the real DB id in onSuccess. */
+  tempId: number;
 }
 
 export function useAddRedaction(
@@ -181,8 +167,7 @@ export function useAddRedaction(
   return useMutation<
     { redaction?: { id: number; match_type?: RedactionMatchType } },
     Error,
-    AddRedactionArgs,
-    { tempId: number; dupe: boolean }
+    AddRedactionArgs
   >({
     mutationFn: async ({ threadId, text }) => {
       const res = await api("/api/admin/redactions", {
@@ -195,37 +180,28 @@ export function useAddRedaction(
       await revalidate();
       return body;
     },
-    onMutate: async ({ threadId, text }) => {
+    onMutate: ({ threadId, text, tempId }) => {
       const trimmed = text.trim();
-      const id = tempId();
-      let dupe = false;
-      patchOne(setThreads, threadId, (t) => {
-        if (t.redactions.some((r) => r.text === trimmed)) {
-          dupe = true;
-          return t;
-        }
-        // Admin-added redactions are literal substring matches by default
-        // (matches the API contract — see app/api/admin/redactions/route.ts).
-        return {
-          ...t,
-          redactions: [
-            ...t.redactions,
-            { id, text: trimmed, source: "admin", match_type: "literal" },
-          ],
-        };
-      });
-      return { tempId: id, dupe };
+      // Admin-added redactions default to literal substring match, matching
+      // the API contract (see app/api/admin/redactions/route.ts).
+      patchOne(setThreads, threadId, (t) => ({
+        ...t,
+        redactions: [
+          ...t.redactions,
+          { id: tempId, text: trimmed, source: "admin", match_type: "literal" },
+        ],
+      }));
     },
-    onSuccess: (data, { threadId, text }, context) => {
-      if (!context || context.dupe) return;
+    onSuccess: (data, { threadId, text, tempId }) => {
       const trimmed = text.trim();
       const realId = data.redaction?.id;
       const matchType: RedactionMatchType = data.redaction?.match_type ?? "literal";
       patchOne(setThreads, threadId, (t) => {
-        const withoutTemp = t.redactions.filter((r) => r.id !== context.tempId);
+        const withoutTemp = t.redactions.filter((r) => r.id !== tempId);
         if (!realId) return { ...t, redactions: withoutTemp };
-        // Avoid double-add if the real row already exists (rare race).
         if (withoutTemp.some((r) => r.id === realId)) {
+          // Server's row already in state (rare race: same text added
+          // concurrently or returned by a prior fetch). Just drop the temp.
           return { ...t, redactions: withoutTemp };
         }
         return {
@@ -237,13 +213,11 @@ export function useAddRedaction(
         };
       });
     },
-    onError: (err, { threadId }, context) => {
-      if (context && !context.dupe) {
-        patchOne(setThreads, threadId, (t) => ({
-          ...t,
-          redactions: t.redactions.filter((r) => r.id !== context.tempId),
-        }));
-      }
+    onError: (err, { threadId, tempId }) => {
+      patchOne(setThreads, threadId, (t) => ({
+        ...t,
+        redactions: t.redactions.filter((r) => r.id !== tempId),
+      }));
       setError(err.message || "Failed to add redaction");
     },
   });
@@ -251,53 +225,38 @@ export function useAddRedaction(
 
 // ─── Remove redaction ───────────────────────────────────────────────────
 
-interface RemoveRedactionArgs {
+export interface RemoveRedactionArgs {
   threadId: number;
   redactionId: number;
+  /** Caller passes the full target row so onError can re-add it on
+   * rollback without depending on stale local state. */
+  target: AdminRedaction;
 }
 
 export function useRemoveRedaction(
   setThreads: SetThreadsFn,
   setError: SetErrorFn,
 ) {
-  return useMutation<
-    void,
-    Error,
-    RemoveRedactionArgs,
-    { target: AdminRedaction | null }
-  >({
+  return useMutation<void, Error, RemoveRedactionArgs>({
     mutationFn: async ({ redactionId }) => {
-      // Refuse to delete temp ids — they aren't persisted.
-      if (redactionId < 0) return;
       await api("/api/admin/redactions", {
         method: "DELETE",
         body: JSON.stringify({ id: redactionId }),
       });
       await revalidate();
     },
-    onMutate: async ({ threadId, redactionId }) => {
-      if (redactionId < 0) return { target: null };
-      let target: AdminRedaction | null = null;
-      setThreads((prev) =>
-        prev.map((t) => {
-          if (t.thread_id !== threadId) return t;
-          const found = t.redactions.find((r) => r.id === redactionId);
-          if (!found || found.source !== "admin") return t;
-          target = found;
-          return { ...t, redactions: t.redactions.filter((r) => r.id !== redactionId) };
-        }),
-      );
-      return { target };
+    onMutate: ({ threadId, redactionId }) => {
+      patchOne(setThreads, threadId, (t) => ({
+        ...t,
+        redactions: t.redactions.filter((r) => r.id !== redactionId),
+      }));
     },
-    onError: (err, { threadId }, context) => {
-      if (context?.target) {
-        const target = context.target;
-        patchOne(setThreads, threadId, (t) =>
-          t.redactions.some((r) => r.id === target.id)
-            ? t
-            : { ...t, redactions: [...t.redactions, target] },
-        );
-      }
+    onError: (err, { threadId, target }) => {
+      patchOne(setThreads, threadId, (t) =>
+        t.redactions.some((r) => r.id === target.id)
+          ? t
+          : { ...t, redactions: [...t.redactions, target] },
+      );
       setError(err.message || "Failed to remove redaction");
     },
   });
@@ -305,9 +264,10 @@ export function useRemoveRedaction(
 
 // ─── Add highlight ──────────────────────────────────────────────────────
 
-interface AddHighlightArgs {
+export interface AddHighlightArgs {
   threadId: number;
   text: string;
+  tempId: number;
 }
 
 export function useAddHighlight(
@@ -317,8 +277,7 @@ export function useAddHighlight(
   return useMutation<
     { highlight?: { id: number } },
     Error,
-    AddHighlightArgs,
-    { tempId: number; dupe: boolean }
+    AddHighlightArgs
   >({
     mutationFn: async ({ threadId, text }) => {
       const res = await api("/api/admin/highlights", {
@@ -329,28 +288,21 @@ export function useAddHighlight(
       await revalidate();
       return body;
     },
-    onMutate: async ({ threadId, text }) => {
+    onMutate: ({ threadId, text, tempId }) => {
       const trimmed = text.trim();
-      const id = tempId();
-      let dupe = false;
-      patchOne(setThreads, threadId, (t) => {
-        if (t.highlights.some((h) => h.text === trimmed)) {
-          dupe = true;
-          return t;
-        }
-        return {
-          ...t,
-          highlights: [...t.highlights, { id, text: trimmed, source: "admin" }],
-        };
-      });
-      return { tempId: id, dupe };
+      patchOne(setThreads, threadId, (t) => ({
+        ...t,
+        highlights: [
+          ...t.highlights,
+          { id: tempId, text: trimmed, source: "admin" },
+        ],
+      }));
     },
-    onSuccess: (data, { threadId, text }, context) => {
-      if (!context || context.dupe) return;
+    onSuccess: (data, { threadId, text, tempId }) => {
       const trimmed = text.trim();
       const realId = data.highlight?.id;
       patchOne(setThreads, threadId, (t) => {
-        const withoutTemp = t.highlights.filter((h) => h.id !== context.tempId);
+        const withoutTemp = t.highlights.filter((h) => h.id !== tempId);
         if (!realId) return { ...t, highlights: withoutTemp };
         if (withoutTemp.some((h) => h.id === realId)) {
           return { ...t, highlights: withoutTemp };
@@ -364,13 +316,11 @@ export function useAddHighlight(
         };
       });
     },
-    onError: (err, { threadId }, context) => {
-      if (context && !context.dupe) {
-        patchOne(setThreads, threadId, (t) => ({
-          ...t,
-          highlights: t.highlights.filter((h) => h.id !== context.tempId),
-        }));
-      }
+    onError: (err, { threadId, tempId }) => {
+      patchOne(setThreads, threadId, (t) => ({
+        ...t,
+        highlights: t.highlights.filter((h) => h.id !== tempId),
+      }));
       setError(err.message || "Failed to add highlight");
     },
   });
@@ -378,55 +328,36 @@ export function useAddHighlight(
 
 // ─── Remove highlight ───────────────────────────────────────────────────
 
-interface RemoveHighlightArgs {
+export interface RemoveHighlightArgs {
   threadId: number;
   highlightId: number;
+  target: AdminHighlight;
 }
 
 export function useRemoveHighlight(
   setThreads: SetThreadsFn,
   setError: SetErrorFn,
 ) {
-  return useMutation<
-    void,
-    Error,
-    RemoveHighlightArgs,
-    { target: AdminHighlight | null }
-  >({
+  return useMutation<void, Error, RemoveHighlightArgs>({
     mutationFn: async ({ highlightId }) => {
-      if (highlightId < 0) return;
       await api("/api/admin/highlights", {
         method: "DELETE",
         body: JSON.stringify({ id: highlightId }),
       });
       await revalidate();
     },
-    onMutate: async ({ threadId, highlightId }) => {
-      if (highlightId < 0) return { target: null };
-      let target: AdminHighlight | null = null;
-      setThreads((prev) =>
-        prev.map((t) => {
-          if (t.thread_id !== threadId) return t;
-          const found = t.highlights.find((h) => h.id === highlightId);
-          if (!found || found.source !== "admin") return t;
-          target = found;
-          return {
-            ...t,
-            highlights: t.highlights.filter((h) => h.id !== highlightId),
-          };
-        }),
-      );
-      return { target };
+    onMutate: ({ threadId, highlightId }) => {
+      patchOne(setThreads, threadId, (t) => ({
+        ...t,
+        highlights: t.highlights.filter((h) => h.id !== highlightId),
+      }));
     },
-    onError: (err, { threadId }, context) => {
-      if (context?.target) {
-        const target = context.target;
-        patchOne(setThreads, threadId, (t) =>
-          t.highlights.some((h) => h.id === target.id)
-            ? t
-            : { ...t, highlights: [...t.highlights, target] },
-        );
-      }
+    onError: (err, { threadId, target }) => {
+      patchOne(setThreads, threadId, (t) =>
+        t.highlights.some((h) => h.id === target.id)
+          ? t
+          : { ...t, highlights: [...t.highlights, target] },
+      );
       setError(err.message || "Failed to remove highlight");
     },
   });

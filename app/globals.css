@@ -59,32 +59,47 @@ html, body {
  * DOM but is visually unreadable; `user-select: none` blocks copy-paste
  * reveal); the brand-tinted color reads as a deliberate UI element rather
  * than a censor bar, and the soft blur on the inner span gives visitors
- * the impression that something specific is hidden — not a void. */
+ * the impression that something specific is hidden — not a void.
+ *
+ * Layout-wise the outer span is plain `display: inline` (no margin, tight
+ * padding) so it occupies the same horizontal space as the previous
+ * black-bar treatment — the From line and other inline-truncated metadata
+ * fit on one line just as before. `box-decoration-break: clone` so a
+ * redaction that wraps across lines gets the rounded corners on each
+ * line box. */
 .redacted {
-  display: inline-block;
-  vertical-align: baseline;
   background: var(--color-accent-soft);
   color: var(--color-accent);
   font-weight: 600;
-  border-radius: 6px;
-  padding: 0 0.3em;
-  margin: 0 0.05em;
+  border-radius: 4px;
+  padding: 0 0.15em;
   user-select: none;
   cursor: default;
-  /* Premium polish: subtle inner highlight + soft brand-toned shadow. */
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.45),
-    0 1px 3px rgb(133 45 221 / 0.08);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  /* Premium polish: soft brand-toned shadow for a subtle pill depth. */
+  box-shadow: 0 1px 2px rgb(133 45 221 / 0.08);
   transition: background 200ms ease, color 200ms ease;
 }
 
-/* Inner span carries the blur so the outer pill's background and shape
- * stay crisp. inline-block contains the blur within the span's box so
- * adjacent words don't catch the haze. */
+/* Inner span carries the blur. `text-shadow` instead of `filter: blur`
+ * because the latter — even on `display: inline` — makes the element
+ * atomic for line-breaking, so a `truncate` container drops the whole
+ * pill as one unit and shows `…` in its place. text-shadow doesn't
+ * change layout or breaking behavior, so the email pill on the From
+ * line cuts at character boundaries with the visible portion still
+ * rendered as a brand-colored fuzzy glow.
+ *
+ * The technique: make the text invisible (`color: transparent`) and
+ * paint multi-stop brand-color halos around where each letter would
+ * be. Visible characters become fuzzy purple blobs in the shape of the
+ * letterforms — unreadable, with a denser glow than `filter: blur`. */
 .redacted-text {
-  display: inline-block;
-  filter: blur(3.5px);
-  -webkit-filter: blur(3.5px);
+  display: inline;
+  color: transparent;
+  text-shadow:
+    0 0 4px var(--color-accent),
+    0 0 6px var(--color-accent);
 }
 
 /* Custom selection treatment — if a visitor drags across a redaction
