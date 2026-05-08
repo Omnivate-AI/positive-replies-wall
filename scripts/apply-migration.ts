@@ -29,6 +29,18 @@ const projectRef = new URL(url).hostname.split(".")[0];
 const sqlPath = resolve(process.cwd(), file);
 const sql = readFileSync(sqlPath, "utf8");
 
+// Idempotency contract: this script does not track applied migrations.
+// Each migration must be safe to re-run (use IF NOT EXISTS, ON CONFLICT,
+// or a guarded UPDATE). If the file lacks a transaction block, partial
+// failures will leave the DB inconsistent — surface that risk loudly.
+const sqlLower = sql.toLowerCase();
+const hasTransaction = sqlLower.includes("begin") && sqlLower.includes("commit");
+if (!hasTransaction) {
+  console.warn(
+    `WARNING: ${file} does not contain BEGIN/COMMIT — partial failures will leave the DB inconsistent. Consider wrapping the file in a transaction block.`,
+  );
+}
+
 console.log(`Applying ${file} to project ${projectRef} (${sql.length} bytes of SQL)...`);
 
 const res = await fetch(
@@ -47,6 +59,25 @@ const body = await res.text();
 if (!res.ok) {
   console.error(`HTTP ${res.status}: ${body}`);
   process.exit(1);
+}
+
+// The Management API returns 200 with `{ "error": "..." }` for SQL-side
+// errors (constraint violation, syntax error, missing table, etc.). Parse
+// the body and refuse to log "OK" if the payload encodes a failure.
+let parsed: unknown = null;
+try {
+  parsed = JSON.parse(body);
+} catch {
+  /* body wasn't JSON; fall through */
+}
+if (parsed && typeof parsed === "object") {
+  const obj = parsed as { error?: unknown; message?: unknown };
+  if (obj.error || obj.message) {
+    console.error(
+      `Migration returned a SQL-side error: ${JSON.stringify(parsed).slice(0, 1000)}`,
+    );
+    process.exit(1);
+  }
 }
 console.log(`OK (${res.status})`);
 console.log(body.slice(0, 500));

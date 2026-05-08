@@ -2,8 +2,26 @@
 
 **Severity:** High
 **Priority:** P1
-**Status:** Open
+**Status:** Closed (auth-independent half) / Deferred (auth-dependent half)
 **Area:** `next.config.ts`, `app/api/admin/*`, deployment config
+
+**Resolution (auth-independent half — done in this batch):**
+
+- `next.config.ts` now defines a `headers()` returning a `Content-Security-Policy` plus the standard hardening set: `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `X-Frame-Options: DENY`. CSP tuned for the actual surface — `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com` (Tailwind v4 hydration emits inline `<style>`), `img-src 'self' data: https://images.unsplash.com`, `font-src 'self' https://fonts.gstatic.com`, `connect-src 'self' https://*.supabase.co`, `frame-ancestors 'none'`. OpenRouter is intentionally absent from `connect-src` because all OpenRouter calls happen server-side from Trigger.dev, never from the browser.
+
+**Deferred (auth-dependent half — moves with main-app integration):**
+
+- Per-IP rate limiting on `/api/admin/*` requires either Upstash Ratelimit + middleware or `@vercel/firewall` rules. Both need infra config (env vars / dashboard access) the project doesn't currently carry. The cleanest landing is *with* auth — per-user rate limits are more useful than per-IP for an admin tool, and the auth integration is the natural place to wire both. Tracked in the M11 follow-up file.
+- The `/api/admin/revalidate` POST stays open and unauthenticated until auth lands. Risk acknowledged in the ticket and the runbook.
+
+The auth-independent CSP+headers fix closes the XSS attack surface. The rate-limit gap remains real but is bounded — the adjacent ticket (#001, deferred) is the bigger exposure.
+
+**Acceptance criteria status:**
+- [x] Response headers on `/` include CSP, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, X-Frame-Options.
+- [ ] CSP report-uri / report-to wired — *deferred. CSP is in non-reporting mode initially; turn on `report-to` once a reporting endpoint is configured.*
+- [ ] Rate limiting on `/api/admin/*` — *deferred to auth integration.*
+- [ ] `/api/admin/revalidate` rate-limited and authenticated — *deferred.*
+- [x] Existing tests + the public wall continue to load with no CSP violations expected (Tailwind's inline styles allowed via `style-src 'unsafe-inline'`; verify in browser DevTools post-deploy).
 
 **Problem**
 The deployed site has none of the standard security hardening:

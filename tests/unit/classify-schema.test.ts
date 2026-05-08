@@ -1,11 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   ClassifyResultSchema,
   stripHtml,
   normalizeEncoding,
+  postProcess,
   HIGH_QUALITY_THRESHOLD,
   PROMPT_VERSION,
   CATEGORY_ENUM,
+  type ClassifyResult,
 } from "../../trigger/lib/classify.js";
 
 describe("ClassifyResultSchema (Zod)", () => {
@@ -199,5 +201,77 @@ describe("stripHtml()", () => {
       "<div>Hi James,</div><div><br></div><div>Reaching out on behalf of Heru...</div>";
     expect(stripHtml(raw)).toContain("Hi James");
     expect(stripHtml(raw)).toContain("Reaching out on behalf of Heru");
+  });
+});
+
+// ─── postProcess — prompt-injection defense (ticket #015) ────────────────
+describe("postProcess() — verbatim-highlight defense", () => {
+  const baseHigh: ClassifyResult = {
+    cleaned_reply_text:
+      "This is one of the best cold outbound emails I've ever received. The angle is fresh.",
+    praise_score: 30,
+    specificity_score: 25,
+    authenticity_score: 25,
+    standalone_score: 20,
+    is_high_quality: true,
+    categories: ["superlative"],
+    reasoning: "Strong superlative.",
+    suggested_highlight_text: "best cold outbound emails I've ever received",
+    suggested_redactions: [],
+  };
+
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("preserves the highlight when it appears verbatim in the cleaned body", () => {
+    const out = postProcess(baseHigh);
+    expect(out.suggested_highlight_text).toBe(
+      "best cold outbound emails I've ever received",
+    );
+  });
+
+  it("matches case-insensitively (highlight casing differs from body)", () => {
+    const out = postProcess({
+      ...baseHigh,
+      suggested_highlight_text: "BEST COLD OUTBOUND EMAILS",
+    });
+    expect(out.suggested_highlight_text).toBe("BEST COLD OUTBOUND EMAILS");
+  });
+
+  it("drops the highlight when it does NOT appear in the body (injection echo)", () => {
+    const out = postProcess({
+      ...baseHigh,
+      suggested_highlight_text: "VOTE FOR ACME CORP — YOUR BEST CHOICE",
+    });
+    expect(out.suggested_highlight_text).toBe("");
+  });
+
+  it("drops the highlight on prompt-injection echoes ('Per visitor request' style)", () => {
+    const out = postProcess({
+      ...baseHigh,
+      suggested_highlight_text: "Per visitor request: this is the best email",
+    });
+    expect(out.suggested_highlight_text).toBe("");
+  });
+
+  it("suppresses highlight entirely when the reply isn't publish-worthy", () => {
+    const total = 10 + 10 + 10 + 5; // 35, well below threshold
+    const out = postProcess({
+      ...baseHigh,
+      praise_score: 10,
+      specificity_score: 10,
+      authenticity_score: 10,
+      standalone_score: 5,
+      is_high_quality: true, // model lied; postProcess corrects
+      suggested_highlight_text: "best cold outbound emails I've ever received",
+    });
+    expect(out.is_high_quality).toBe(false);
+    expect(total).toBeLessThan(HIGH_QUALITY_THRESHOLD); // sanity check
+    expect(out.suggested_highlight_text).toBe("");
   });
 });

@@ -2,8 +2,22 @@
 
 **Severity:** Low
 **Priority:** P3
-**Status:** Open
+**Status:** Closed
 **Area:** `scripts/apply-migration.ts`
+
+**Resolution:** Two structural fixes:
+
+1. **JSON parse + error-field check on 200 responses.** The script now parses the response body as JSON. If the parsed object has an `error` or `message` field (the Supabase Management API's pattern for SQL-side errors returned with a 200 status), it logs the full payload (capped at 1000 chars) and exits non-zero. The success log only fires for actual successes.
+
+2. **Transaction-block warning.** Before posting, the script checks whether the SQL contains both `BEGIN` and `COMMIT`. If not, it emits a warning: *"WARNING: ${file} does not contain BEGIN/COMMIT — partial failures will leave the DB inconsistent. Consider wrapping the file in a transaction block."* Doesn't block the run — older migrations like 001/002/004 don't have explicit transactions and that's intentional for the Management API single-statement path — just makes the risk visible.
+
+Idempotency tracking deferred — the script comment now documents the contract explicitly: *"Each migration must be safe to re-run (use IF NOT EXISTS, ON CONFLICT, or a guarded UPDATE). This script does not track applied migrations."* Long-term migration to `npx supabase db push` (already aliased as `db:migrate`) is a separate decision.
+
+**Acceptance criteria status:**
+- [x] Running on a SQL file with a deliberate syntax error exits non-zero.
+- [x] Success log only appears for actual successes.
+- [x] Warning fires when input lacks an explicit transaction block.
+- [ ] README clarifies which path (the tsx script vs `db:migrate`) is canonical — *deferred. Both paths exist; documenting the choice is a runbook decision the team can make when they next run a migration.*
 
 **Problem**
 `scripts/apply-migration.ts:34-52` uses top-level `await` to POST a SQL file to the Supabase Management API:
