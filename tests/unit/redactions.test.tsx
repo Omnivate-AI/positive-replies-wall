@@ -3,8 +3,25 @@ import { isValidElement, type ReactNode } from "react";
 import { applyRedactions, inferMatchType } from "../../lib/redactions.js";
 
 /** Flatten the React node returned by applyRedactions into a plain array of
- * { kind: 'text' | 'redact', text } so assertions stay readable. */
+ * { kind: 'text' | 'redact', text } so assertions stay readable.
+ *
+ * Redaction spans now have a nested `<span class="redacted-text">` inside
+ * the outer `<span class="redacted">` (the inner span carries the blur,
+ * the outer carries the pill background — see `.redacted` in globals.css).
+ * `extractText` walks the tree to pull out the leaf text regardless of
+ * nesting depth so assertions don't have to know about that structure. */
 type Segment = { kind: "text" | "redact"; text: string };
+function extractText(children: ReactNode): string {
+  if (typeof children === "string") return children;
+  if (typeof children === "number") return String(children);
+  if (!children) return "";
+  if (Array.isArray(children)) return children.map(extractText).join("");
+  if (isValidElement(children)) {
+    return extractText((children.props as { children?: ReactNode }).children);
+  }
+  return "";
+}
+
 function flatten(node: ReactNode): Segment[] {
   if (typeof node === "string") return [{ kind: "text", text: node }];
   if (!Array.isArray(node)) return [];
@@ -13,9 +30,8 @@ function flatten(node: ReactNode): Segment[] {
     if (!isValidElement(child)) continue;
     type ChildProps = { className?: string; children?: ReactNode };
     const props = child.props as ChildProps;
-    const text =
-      typeof props.children === "string" ? props.children : String(props.children ?? "");
     const isRedacted = props.className === "redacted";
+    const text = extractText(props.children);
     out.push({ kind: isRedacted ? "redact" : "text", text });
   }
   return out;

@@ -22,11 +22,6 @@ import { getPublishedWallThreads } from "@/lib/supabase-public";
 export const revalidate = 60;
 
 const BOOK_CALL_URL = "https://app.usemotion.com/meet/omar-almubarak/jzkldtn";
-// White wall with soft geometric pattern — picked by Omar from Unsplash.
-// Subtle texture rather than a literal photo, sits in the background at
-// reduced opacity so the headline panel reads clearly above it.
-const HERO_IMAGE =
-  "https://images.unsplash.com/photo-1712148322457-83ca27a083a1?w=2000&q=80&auto=format&fit=crop";
 
 export default async function HomePage() {
   let threads: Awaited<ReturnType<typeof getPublishedWallThreads>> = [];
@@ -61,14 +56,6 @@ export default async function HomePage() {
             </span>
           </Link>
           <div className="flex items-center gap-3">
-            <a
-              href={BOOK_CALL_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hidden text-sm font-medium text-fg-muted transition-colors hover:text-fg sm:inline-flex"
-            >
-              Book a call
-            </a>
             <Link
               href="/admin"
               className="inline-flex items-center gap-1.5 rounded-button border border-border bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted shadow-button transition-colors hover:border-border-strong hover:text-fg"
@@ -81,25 +68,11 @@ export default async function HomePage() {
       </div>
 
       {/* ───── Hero ───── */}
-      <section className="relative overflow-hidden">
-        {/* Photo is a real backdrop now — no heavy white veil. The image
-         * fills the section at full opacity; only a soft white fade at
-         * top + bottom keeps the topbar / next-section transition smooth
-         * and a translucent backdrop sits behind the headline so the
-         * type stays legible. */}
-        <Image
-          src={HERO_IMAGE}
-          alt=""
-          aria-hidden="true"
-          fill
-          priority
-          sizes="100vw"
-          quality={75}
-          className="object-cover opacity-20"
-        />
-        <div className="absolute inset-x-0 top-0 h-24 bg-linear-to-b from-bg to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 h-32 bg-linear-to-t from-bg to-transparent" />
-        <div className="relative w-full px-6 py-28 sm:px-8 sm:py-36 lg:px-16 lg:py-44">
+      {/* Hero image removed — the headline panel now reads cleanly on the
+       * page background without the Unsplash backdrop. Section keeps its
+       * vertical breathing room via the inner padding. */}
+      <section>
+        <div className="w-full px-6 py-28 sm:px-8 sm:py-36 lg:px-16 lg:py-44">
           <div className="mx-auto max-w-3xl rounded-card bg-surface/80 p-10 text-center shadow-card-hover backdrop-blur-md sm:p-12">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
               Wall of replies

@@ -48,7 +48,18 @@ export function WallGrid({ threads }: { threads: WallThread[] }) {
 
   return (
     <div className="space-y-12">
-      <div className="columns-1 gap-8 sm:columns-2 lg:columns-3 xl:columns-4">
+      {/* Row-major flow so cards read left-to-right by priority order
+       * (priority 1 top-left, priority 2 to its right, …, then wrap to
+       * the next row). The `gridTemplateRows: "masonry"` style adds a
+       * Pinterest-style auto-pack on Safari 17.4+ (CSS Grid Level 3),
+       * gracefully falling back to fixed-row Grid in Chrome/Firefox where
+       * the spec isn't yet implemented. CSS columns (the previous
+       * approach) flowed top-to-bottom, which put priority 1 *above*
+       * priority 2 instead of to the right of it. */}
+      <div
+        className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 items-start"
+        style={{ gridTemplateRows: "masonry" } as React.CSSProperties}
+      >
         {visible.map((t) => {
           const { body, highlights } = truncatedBody(t.body, t.highlights);
           // Defense-in-depth: db rows + SDR allowlist + sender fields all
@@ -74,7 +85,7 @@ export function WallGrid({ threads }: { threads: WallThread[] }) {
             return out;
           })();
           return (
-            <div key={t.thread_id} className="mb-8 break-inside-avoid">
+            <div key={t.thread_id}>
               <EmailReplyCard
                 from_email={t.from_email}
                 from_display_name={t.from_display_name}

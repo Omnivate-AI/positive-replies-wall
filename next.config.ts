@@ -1,43 +1,38 @@
 import type { NextConfig } from "next";
 
-/** Baseline CSP for the public wall + admin. Tuned against the actual
- * Next.js 16 build output:
+/** Dev mode needs two extra allowances vs production:
  *
- *   - **`script-src 'self' 'unsafe-inline'`.** Next.js 16 emits ~12 inline
- *     `<script>` tags per server-rendered page for the RSC/Flight
- *     hydration payload (`self.__next_f.push(...)`). A nonce-based CSP
- *     would be stricter, but it requires a `middleware.ts` that
- *     generates a per-request nonce — and per-request nonces don't
- *     work cleanly with ISR'd pages like `/` (the prerendered HTML is
- *     shared across requests, so a nonce can't match). For now,
- *     `'unsafe-inline'` is acceptable: this app renders no
- *     user-controlled HTML (all body content goes through React text
- *     nodes; no `dangerouslySetInnerHTML` anywhere), so the script-side
- *     XSS surface is small. Tracked as a follow-up: tighten to nonces
- *     when the main-app integration introduces auth + middleware.
+ *   - **`script-src 'unsafe-eval'`.** React's development build uses
+ *     `eval()` for callstack reconstruction in the error overlay and a
+ *     few other debug features. Production never uses eval — see
+ *     https://react.dev for the dev-only contract.
+ *   - **`style-src 'unsafe-inline'`.** Next.js's dev overlay (the floating
+ *     button with the runtime-error count, the issue panel, the build
+ *     activity indicator) injects inline `<style>` tags. Without
+ *     `'unsafe-inline'` those are blocked and the overlay renders as
+ *     unstyled text fragments ("0", "1", "issue") instead of the floating
+ *     UI. Production ships zero inline styles (Tailwind v4 emits an
+ *     external stylesheet — verified against `.next/server/app/`).
  *
- *   - **`style-src 'self' https://fonts.googleapis.com`.** Tailwind v4's
- *     CSS is emitted as an external `<link rel="stylesheet">`, not
- *     inline `<style>` tags (verified against `.next/server/app/`
- *     output). `'unsafe-inline'` is therefore unnecessary on the
- *     style-side and has been removed.
- *
- *   - **`img-src` includes `images.unsplash.com`** because the wall hero
- *     and the auth aside fetch from there via `next/image`.
- *
- *   - **`connect-src 'self' https://*.supabase.co`.** OpenRouter is
- *     server-only (Trigger.dev), never browser, so it's intentionally
- *     absent.
- *
- *   - **`frame-ancestors 'none'`** blocks clickjacking everywhere,
- *     including `/admin`.
+ * Production CSP is unchanged from Batch 9 + the verification fix:
+ * `script-src 'self' 'unsafe-inline'` (needed for Next.js's RSC/Flight
+ * hydration scripts; nonce-based CSP doesn't compose cleanly with ISR's
+ * shared prerendered HTML — tracked for the auth-integration milestone),
+ * `style-src 'self' https://fonts.googleapis.com` (no inline allowance —
+ * verified unnecessary).
  */
+const isDev = process.env.NODE_ENV === "development";
+
 const CSP = [
   "default-src 'self'",
   "img-src 'self' data: https://images.unsplash.com",
-  "style-src 'self' https://fonts.googleapis.com",
+  isDev
+    ? "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com"
+    : "style-src 'self' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
-  "script-src 'self' 'unsafe-inline'",
+  isDev
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+    : "script-src 'self' 'unsafe-inline'",
   "connect-src 'self' https://*.supabase.co",
   "frame-ancestors 'none'",
   "base-uri 'self'",

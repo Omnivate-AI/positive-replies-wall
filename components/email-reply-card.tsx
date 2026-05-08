@@ -198,7 +198,13 @@ export function EmailReplyCard({
         </h3>
       )}
 
-      {/* Sender row: "From: Name <email>" reads as one line of text + timestamp on the right */}
+      {/* Sender row: "From: Name <email>" reads as one line of text +
+       * timestamp on the right. The bracket-wrapped form `<email>` is
+       * passed through applyRedactions as a single unit (with the
+       * bracket-wrapped variant added to the redaction set so the
+       * longest-first matcher captures the whole `<email>` block) — that
+       * way the angle brackets don't render as visible plain text outside
+       * the redaction. */}
       <div className="mt-4 flex items-baseline justify-between gap-3">
         <div className="min-w-0 flex-1 truncate text-sm text-fg redaction-transition">
           <span className="font-medium text-fg-muted">
@@ -217,7 +223,10 @@ export function EmailReplyCard({
                 : "text-fg"
             }
           >
-            &lt;{applyRedactions(from_email, redactions)}&gt;
+            {applyRedactions(`<${from_email}>`, [
+              ...redactions,
+              { text: `<${from_email}>`, match_type: "literal" as const },
+            ])}
           </span>
         </div>
         {dateStr && (

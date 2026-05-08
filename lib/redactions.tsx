@@ -88,9 +88,12 @@ export function applyRedactions(
     if (m.index > lastIdx) {
       out.push(<Fragment key={`t${key++}`}>{text.slice(lastIdx, m.index)}</Fragment>);
     }
+    // Nested span structure: outer `.redacted` carries the brand-color
+    // pill (background, padding, rounded corners), inner `.redacted-text`
+    // carries the blur. See `.redacted` rule in app/globals.css for why.
     out.push(
       <span key={`r${key++}`} className="redacted">
-        {m[0]}
+        <span className="redacted-text">{m[0]}</span>
       </span>,
     );
     lastIdx = m.index + m[0].length;

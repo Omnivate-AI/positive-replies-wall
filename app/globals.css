@@ -54,24 +54,46 @@ html, body {
   }
 }
 
-/* Redaction bar — solid black rectangle the same height as surrounding text,
- * with subtle inner shadow to read as opaque "tape" not just a colored span.
- * Width is governed by the text it replaces (which stays in the DOM but is
- * visually invisible via color: transparent). */
+/* Redaction — brand-color pill with blurred text. Replaces the M9-era
+ * black-bar treatment. Privacy contract is preserved (text stays in the
+ * DOM but is visually unreadable; `user-select: none` blocks copy-paste
+ * reveal); the brand-tinted color reads as a deliberate UI element rather
+ * than a censor bar, and the soft blur on the inner span gives visitors
+ * the impression that something specific is hidden — not a void. */
 .redacted {
-  background: #000;
-  color: transparent;
-  border-radius: 2px;
-  padding: 0 0.15em;
+  display: inline-block;
+  vertical-align: baseline;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 0 0.3em;
+  margin: 0 0.05em;
   user-select: none;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
+  cursor: default;
+  /* Premium polish: subtle inner highlight + soft brand-toned shadow. */
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.45),
+    0 1px 3px rgb(133 45 221 / 0.08);
   transition: background 200ms ease, color 200ms ease;
 }
 
-.redacted::selection {
-  background: #000;
-  color: transparent;
+/* Inner span carries the blur so the outer pill's background and shape
+ * stay crisp. inline-block contains the blur within the span's box so
+ * adjacent words don't catch the haze. */
+.redacted-text {
+  display: inline-block;
+  filter: blur(3.5px);
+  -webkit-filter: blur(3.5px);
+}
+
+/* Custom selection treatment — if a visitor drags across a redaction
+ * the highlight matches the brand wash so the underlying letterforms
+ * never become readable via OS-level inverse contrast. */
+.redacted::selection,
+.redacted *::selection {
+  background: var(--color-accent);
+  color: var(--color-accent);
 }
 
 /* Smooth fade for the entire reply card body when the redaction toggle flips */
