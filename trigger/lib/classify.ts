@@ -10,8 +10,7 @@
 
 import { z } from "zod";
 import { readFileSync } from "fs";
-import { fileURLToPath } from "url";
-import { dirname, resolve } from "path";
+import { resolve } from "path";
 import { chatJson, type ChatMessage } from "./openrouter.js";
 
 /**
@@ -96,11 +95,25 @@ export interface ClassifyInput {
 
 // Load the prompt at module init. We do this lazily-on-first-call so tests
 // that mock OpenRouter don't pay the file-read cost.
+//
+// Path resolution: in the Trigger.dev deployed bundle, `import.meta.url`
+// resolves to the bundled-output path (e.g. `/index.js`), not the original
+// source file location, so the previous `dirname(fileURLToPath(import.meta.url))`
+// approach broke (resolving to `/prompts/classify-reply.md` at the filesystem
+// root). Switched to `process.cwd()` — the canonical pattern in the outbound
+// repo — paired with the `additionalFiles` build extension in
+// `trigger.config.ts` that copies the prompt file into the bundle at the
+// listed path. Locally (`tsx scripts/classify-local.ts`), `process.cwd()` is
+// the repo root, so the same `trigger/prompts/...` path works there too.
 let _systemPrompt: string | null = null;
 function getSystemPrompt(): string {
   if (_systemPrompt) return _systemPrompt;
-  const here = dirname(fileURLToPath(import.meta.url));
-  const promptPath = resolve(here, "..", "prompts", "classify-reply.md");
+  const promptPath = resolve(
+    process.cwd(),
+    "trigger",
+    "prompts",
+    "classify-reply.md",
+  );
   _systemPrompt = readFileSync(promptPath, "utf8");
   return _systemPrompt;
 }

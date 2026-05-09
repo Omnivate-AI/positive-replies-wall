@@ -1,4 +1,5 @@
 import { defineConfig } from "@trigger.dev/sdk";
+import { additionalFiles } from "@trigger.dev/build/extensions/core";
 
 export default defineConfig({
   // Reusing the existing Omnivate production Trigger.dev project (same ref as
@@ -22,6 +23,20 @@ export default defineConfig({
     },
   },
   dirs: ["./trigger"],
+  build: {
+    extensions: [
+      // Bundle the classifier prompt into the deploy artifact. Without this,
+      // `import.meta.url`-based path resolution at runtime resolves to
+      // `/index.js` (the bundled output's location), and the classifier
+      // throws ENOENT trying to read `/prompts/classify-reply.md` — leaving
+      // newly ingested threads stuck unclassified. (See trigger/lib/classify.ts
+      // — the prompt is now resolved via `process.cwd()` against the path
+      // listed below.)
+      additionalFiles({
+        files: ["./trigger/prompts/*.md"],
+      }),
+    ],
+  },
   // Note: deliberately NOT using the syncEnvVars build extension that
   // outbound/trigger.config.ts uses. The Trigger.dev project is shared with
   // outbound's 112 tasks, and that extension would clobber outbound's env vars
