@@ -7,7 +7,7 @@ Phase 5: continuous operations. The wall + admin shipped in M10; new positive re
 - **One scheduled task** at `trigger/scheduled-ingest-and-classify.ts`. Runs daily at **08:00 Europe/London** (BST/GMT auto-handled by the cron `timezone` field). Calls `ingestSmartleadReplies` then `classifyReplies` via `triggerAndWait`.
 - **Independent failure handling.** If today's ingest fails, classify still runs — it operates on the full set of unclassified threads and can catch up older work. Both child runs surface independently in the Trigger.dev dashboard.
 - **Failure surfacing** uses Trigger.dev's built-in alert configuration (set in the dashboard, not in code). The brief's "twice in a row" rule maps directly to a Trigger.dev alert.
-- **Slack notifications deferred** to a follow-up. Code design is documented in `docs/m11-runbook.md` so we can drop in `notifySlack()` calls without re-architecting once the bot token is provisioned.
+- **Failure alerts via Trigger.dev's built-in email channel** — the brief's "email, Slack, or Trigger.dev built-in" choice. Configured per-task in the dashboard.
 - **Runbook** at `docs/m11-runbook.md` covering the six topics the brief mandates plus a steady-state cost estimate.
 
 ## What ships
@@ -43,7 +43,7 @@ Trigger.dev has built-in alert wiring per task — configured in the dashboard, 
 
 Two-in-a-row is the brief's threshold. The wrapper task's own alert is the first defence; the inner-task alerts are belt-and-braces.
 
-Slack-channel notifications (planned: a single daily summary post + per-failure pings to `#positive-replies`) are documented in the runbook as a deferred follow-up. Reasoning: setting up the Slack bot token + channel + invite needs Omar to do the workspace config; we shipped the rest of M11 without blocking on that.
+No Slack layer. The Trigger.dev email alerts cover the brief's "twice in a row" requirement, and a Slack daily-summary feature was discussed but cut as not load-bearing.
 
 ### Runbook
 
@@ -76,7 +76,7 @@ Plus a steady-state monthly cost estimate grounded in real backfill numbers and 
 ## Deviations from the brief
 
 - **Cadence: daily at 08:00 London** instead of the brief's suggested "hourly or every six hours." Reasoning (Omar 2026-05-07): steady-state volume is low (single-digit positive replies per day on a typical day), and the wall is a once-a-day-glance asset rather than a real-time feed. Daily 8 AM matches how Omar opens his laptop. Easy to switch to hourly if volume grows — one-line cron change.
-- **Alert delivery: Trigger.dev built-in alerts (email)** instead of a custom Slack notification. The brief allows "email, Slack, or Trigger.dev's built-in alerts" — built-in is the cheapest option and satisfies the requirement. The Slack-summary feature Omar wants on top of this is documented in the runbook as a follow-up; it's not in the brief's must-have list.
+- **Alert delivery: Trigger.dev built-in alerts (email)** instead of a custom Slack notification. The brief allows "email, Slack, or Trigger.dev's built-in alerts" — built-in is the cheapest option that satisfies the requirement, and we cut the Slack daily-summary idea as out of scope.
 
 ## Files added
 
@@ -97,9 +97,6 @@ No changes to existing tasks. The schedule is purely additive — the M5 and M6 
 
 ## What's next (post-M11)
 
-The five-phase build is complete. Follow-up work that surfaced during M11 but is out of scope for the milestone:
+The five-phase build is complete. Only one item remains open: **restore admin auth on `/admin`** — gated on Omar regaining access to the Supabase Auth config (SMTP sender + redirect-URL whitelist), or swapping to a hard-coded session-cookie allowlist (~30 LOC, no Supabase Auth dependency). See `report.md` §3.1 for the two paths.
 
-- **Slack daily summary** — a `notifySlack` call at the end of the scheduled task posting `<N> new positive replies, <M> high-quality` to `#positive-replies`. Spec'd in the runbook; awaits bot token provisioning by Omar.
-- **Cost dashboard pull** — replace the runbook's manually-pasted cost numbers with a small monthly script that queries OpenRouter + Trigger.dev usage APIs.
-- **Drop the dormant `prw_threads.highlight_text` column** (M10 left it as audit-trail). Safe to drop once we're confident the multi-highlight schema has been stable for a couple of weeks.
-- **Wall improvements driven by visitor analytics** — currently the wall has no tracking; we don't know if the footer CTA converts. Adding a privacy-respecting page-view + CTA-click counter would close the loop on whether the wall actually drives bookings.
+Everything else from the post-M11 backlog (Slack summaries, visitor analytics, cost-dashboard pull, dropping the dormant column) was either landed in follow-up work or intentionally cut.

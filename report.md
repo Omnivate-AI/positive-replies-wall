@@ -54,36 +54,20 @@ The wrapper task crashed silently between stages on Omar's first dashboard test:
 
 ---
 
-## 3. Plan for next week
+## 3. What's left
 
-The brief is delivered. Next week turns "shipped" into "operational." Sequenced by impact-per-effort.
+Only one open item — and only when Omar regains access to the Supabase Auth config.
 
-### 3.1 Slack notifications — ~1 hour
+### 3.1 Restore admin auth on `/admin`
 
-Daily summary message to `#positive-replies` ("📬 4 new positive replies, 2 high-quality") and per-stage failure alerts. The runbook already documents the design; it just needs the bot token + channel.
+The brief required magic-link auth on the admin route. We removed it mid-M10 because Supabase Auth's SMTP sender + redirect-URL whitelist were gated behind infra access Omar didn't have on the shared project. The admin tool is currently open access — anyone who knows the URL can publish/unpublish, edit redactions, etc. The data risk is bounded (wall content is public-facing testimonials, not customer PII) and the URL is unadvertised, but it's a real gap.
 
-- **Omar:** create the channel, invite the existing outbound bot.
-- **Me:** add the env vars to Trigger.dev, copy the outbound repo's `slack-notify.ts` shape, wire summary + alerts into the wrapper task.
+Two paths when ready:
 
-### 3.2 Configure Trigger.dev failure alerts — 15 minutes (Omar)
+- **Magic link via Supabase Auth (per the brief)** — needs SMTP / redirect-URL config Omar must enable on the project.
+- **Hard-coded session-cookie allowlist** — ~30 LOC, no Supabase Auth dependency. Server route checks Omar's email (or a shared password) against an env-var allowlist, issues a signed cookie, middleware gates `/admin/*` and `/api/admin/*`. Faster to land if the Supabase config keeps being a blocker.
 
-Trigger.dev dashboard → for each of the three task IDs, alert on 2 consecutive failures → email Omar. Backstop to the Slack alerts above.
-
-### 3.3 Fix the missing inbound `subject` — ~1 hour
-
-Diagnostic from M11: 252 of 253 inbound qualifying messages have `subject = null`. The wall has been silently omitting subjects on every card since launch. Investigate whether Smartlead's `email_history` API surfaces inbound subject; if yes, fix the mapper. If no, fall back to the first outbound subject prefixed with `Re: `.
-
-### 3.4 Visitor analytics — ~2 hours
-
-The wall is live but we have zero signal on whether visitors click the CTA. Add Vercel Analytics + a custom event on the "Book a call" CTA, and include click count in the daily Slack summary. Closes the loop on whether the wall actually drives bookings.
-
-### 3.5 Drop the dormant `prw_threads.highlight_text` column — ~30 minutes
-
-Migration 005. Unused since migration 004; the e2e test already broke once on it. Audit-trail value is low — `prw_highlights` source attribution is a strict superset.
-
-### 3.6 (Stretch) "What we said that earned the reply" — admin-only thread context view
-
-`prw_messages` already stores every outbound step + inbound reply; no UI surfaces them. A timeline view in the admin pane would let Omar see the SDR sequence that earned each positive reply and start to learn what works. Not in the brief — pure value-add. ~4–6 hours.
+Everything else from the brief is delivered. Slack notifications, visitor analytics, and the rest of last week's "could-do" list are intentionally dropped.
 
 ---
 

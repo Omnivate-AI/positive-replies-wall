@@ -46,7 +46,7 @@ Configured in the Trigger.dev dashboard, not in code. For each of the three task
 
 Set: **alert on 2 consecutive failures → email** (Omar's email). The wrapper's alert is the first defence; the inner-task alerts are the safety net for partial failures (e.g. ingest succeeds but classify dies).
 
-A Slack-summary feature on top of these alerts is **deferred** — see [Slack notifications — deferred](#slack-notifications--deferred).
+No additional Slack/webhook layer — the built-in Trigger.dev email alerts are the canonical channel.
 
 ---
 
@@ -289,24 +289,6 @@ The pipeline crosses out of free-tier territory only at:
 - **~10,000 monthly classifications** (would clear into ~$10/month OpenRouter spend — i.e. ~1,400 replies/month, an order of magnitude beyond plausible).
 
 None are near-term risks. **Budget this at $1/month worst-case for the next 12 months.**
-
----
-
-## Slack notifications — deferred
-
-A daily Slack summary (`<N> new positive replies, <M> high-quality`) plus per-failure pings was scoped during M11 planning but deferred. Setup needs Omar to provision a Slack bot token and create a `#positive-replies` channel.
-
-When ready to wire it up, the implementation is small:
-
-1. Provision a Slack bot in the Omnivate workspace (or reuse outbound's bot identity — same token, same workspace, just invite into the new channel).
-2. Add `SLACK_BOT_TOKEN` to Trigger.dev env vars.
-3. Add `WALL_BASE_URL=https://positive-replies-wall.vercel.app` to Trigger.dev env vars.
-4. Create `trigger/lib/slack-notify.ts` — copy the shape from `outbound/trigger/lib/slack-notify.ts` (best-effort `chat.postMessage`, never throws).
-5. Edit `trigger/scheduled-ingest-and-classify.ts`:
-   - On success: post one summary line — `📬 Daily run: 4 new positive replies, 2 high-quality. View admin: <WALL_BASE_URL>/admin`
-   - On failure: post a one-line alert with task name + error + Trigger.dev run URL.
-
-Estimated work: ~1 hour including the smoke-test.
 
 ---
 
