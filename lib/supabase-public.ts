@@ -96,6 +96,65 @@ async function withRetry<T>(label: string, fn: () => PromiseLike<T>): Promise<T>
   throw lastErr;
 }
 
+/** Smartlead's email_history API does not return a subject on inbound
+ * messages — only on outbound. The qualifying inbound row's subject is
+ * therefore null on essentially every thread. The natural fallback is
+ * "Re: <first outbound subject>" — which is what the lead's own email
+ * client would show in their reply pane.
+ *
+ * This helper handles three edge cases:
+ *   1. Inbound has its own subject (rare, ~1/253 in practice) → use as-is.
+ *   2. Outbound subject already starts with "Re:" / "RE:" / "Fwd:" /
+ *      "FW:" → don't double-prefix; return as-is.
+ *   3. No usable subject anywhere → return null (renderer skips the
+ *      subject row).
+ */
+function subjectWithFallback(
+  inboundSubject: string | null | undefined,
+  firstOutboundSubject: string | null | undefined,
+): string | null {
+  const inb = inboundSubject?.trim();
+  if (inb) return inb;
+  const out = firstOutboundSubject?.trim();
+  if (!out) return null;
+  if (/^(re|fw|fwd)\s*:/i.test(out)) return out;
+  return `Re: ${out}`;
+}
+
+/** Fetch the earliest outbound subject per thread, used as the inbound
+ * subject fallback. Batched to handle Supabase's 1000-row server cap. */
+async function fetchFirstOutboundSubjects(
+  sb: SupabaseClient,
+  threadIds: number[],
+  label: string,
+): Promise<Map<number, string>> {
+  if (threadIds.length === 0) return new Map();
+  type Row = { thread_id: number; subject: string | null; sent_at: string };
+  const all = await fetchInBatches<Row>(
+    threadIds,
+    (batch) =>
+      sb
+        .from("prw_messages")
+        .select("thread_id, subject, sent_at")
+        .in("thread_id", batch)
+        .eq("direction", "outbound")
+        .not("subject", "is", null),
+    label,
+  );
+  // Pick the earliest non-null outbound subject per thread.
+  const byThread = new Map<number, { subject: string; sent_at: string }>();
+  for (const r of all) {
+    if (!r.subject) continue;
+    const existing = byThread.get(r.thread_id);
+    if (!existing || r.sent_at < existing.sent_at) {
+      byThread.set(r.thread_id, { subject: r.subject, sent_at: r.sent_at });
+    }
+  }
+  const out = new Map<number, string>();
+  for (const [id, { subject }] of byThread) out.set(id, subject);
+  return out;
+}
+
 export interface ReplyStats {
   totalReplies: number;
   highQualityCount: number;
@@ -189,11 +248,17 @@ export async function getWallThreads(limit = 10): Promise<WallThread[]> {
   if (threadIds.length === 0) return [];
 
   // 3. Qualifying inbound message per thread (for subject, sent_at, to_email).
-  const { data: msgs, error: mErr } = await sb
-    .from("prw_messages")
-    .select("thread_id, subject, sent_at, to_email")
-    .in("thread_id", threadIds)
-    .eq("is_qualifying_reply", true);
+  // Smartlead's email_history doesn't return inbound subject — we fall back
+  // to the first outbound subject prefixed with "Re:". Fetched separately
+  // and used in subjectWithFallback() below.
+  const [{ data: msgs, error: mErr }, firstOutboundSubjects] = await Promise.all([
+    sb
+      .from("prw_messages")
+      .select("thread_id, subject, sent_at, to_email")
+      .in("thread_id", threadIds)
+      .eq("is_qualifying_reply", true),
+    fetchFirstOutboundSubjects(sb, threadIds, "getWallThreads outbound subjects"),
+  ]);
   if (mErr) throw new Error(`getWallThreads messages: ${mErr.message}`);
   const msgByThread = new Map<
     number,
@@ -269,7 +334,7 @@ export async function getWallThreads(limit = 10): Promise<WallThread[]> {
       from_email: r.thread.lead_email,
       from_display_name: fullName.length > 0 ? fullName : null,
       to_email: msg?.to_email ?? null,
-      subject: msg?.subject ?? null,
+      subject: subjectWithFallback(msg?.subject, firstOutboundSubjects.get(r.thread_id)),
       body: r.cleaned_reply_text ?? "",
       highlights: hlsByThread.get(r.thread_id) ?? [],
       received_at: msg?.sent_at ?? null,
@@ -354,18 +419,21 @@ export async function getPublishedWallThreads(): Promise<WallThread[]> {
     sent_at: string;
     to_email: string | null;
   };
-  const msgs = await withRetry("wall: messages", () =>
-    fetchInBatches<MsgRow>(
-      threadIds,
-      (batch) =>
-        sb
-          .from("prw_messages")
-          .select("thread_id, subject, sent_at, to_email")
-          .in("thread_id", batch)
-          .eq("is_qualifying_reply", true),
-      "wall: messages",
+  const [msgs, firstOutboundSubjects] = await Promise.all([
+    withRetry("wall: messages", () =>
+      fetchInBatches<MsgRow>(
+        threadIds,
+        (batch) =>
+          sb
+            .from("prw_messages")
+            .select("thread_id, subject, sent_at, to_email")
+            .in("thread_id", batch)
+            .eq("is_qualifying_reply", true),
+        "wall: messages",
+      ),
     ),
-  );
+    fetchFirstOutboundSubjects(sb, threadIds, "wall: outbound subjects"),
+  ]);
   const msgByThread = new Map<number, MsgRow>();
   for (const m of msgs) msgByThread.set(m.thread_id, m);
 
@@ -421,7 +489,7 @@ export async function getPublishedWallThreads(): Promise<WallThread[]> {
         from_email: r.lead_email,
         from_display_name: fullName.length > 0 ? fullName : null,
         to_email: msg?.to_email ?? null,
-        subject: msg?.subject ?? null,
+        subject: subjectWithFallback(msg?.subject, firstOutboundSubjects.get(r.id)),
         body: c?.cleaned_reply_text ?? "",
         highlights: hls.map((h) => h.text),
         received_at: msg?.sent_at ?? null,
@@ -527,16 +595,19 @@ export async function getAdminThreads(): Promise<AdminThread[]> {
     sent_at: string;
     to_email: string | null;
   };
-  const msgs = await fetchInBatches<AdminMsgRow>(
-    threadIds,
-    (batch) =>
-      sb
-        .from("prw_messages")
-        .select("thread_id, subject, sent_at, to_email")
-        .in("thread_id", batch)
-        .eq("is_qualifying_reply", true),
-    "getAdminThreads messages",
-  );
+  const [msgs, firstOutboundSubjects] = await Promise.all([
+    fetchInBatches<AdminMsgRow>(
+      threadIds,
+      (batch) =>
+        sb
+          .from("prw_messages")
+          .select("thread_id, subject, sent_at, to_email")
+          .in("thread_id", batch)
+          .eq("is_qualifying_reply", true),
+      "getAdminThreads messages",
+    ),
+    fetchFirstOutboundSubjects(sb, threadIds, "getAdminThreads outbound subjects"),
+  ]);
   const msgByThread = new Map<number, AdminMsgRow>();
   for (const m of msgs) msgByThread.set(m.thread_id, m);
 
@@ -620,7 +691,7 @@ export async function getAdminThreads(): Promise<AdminThread[]> {
         from_email: r.lead_email,
         from_display_name: fullName.length > 0 ? fullName : null,
         to_email: msg?.to_email ?? null,
-        subject: msg?.subject ?? null,
+        subject: subjectWithFallback(msg?.subject, firstOutboundSubjects.get(r.id)),
         body: latest?.cleaned_reply_text ?? "",
         received_at: msg?.sent_at ?? null,
         total_score: latest?.total_score ?? 0,
