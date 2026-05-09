@@ -89,7 +89,7 @@ const CSP = [
 Long-term — Option 1 (nonce-based) is the right answer; track as a follow-up. Either way, this needs to ship before merge — the current config bricks the live site.
 
 **Acceptance criteria**
-- [ ] Curl + load test of `https://positive-repies-wall.vercel.app/` shows zero CSP violations in the browser console.
+- [ ] Curl + load test of `https://positive-replies-wall.vercel.app/` shows zero CSP violations in the browser console.
 - [ ] Manual smoke: "Show more" button on `/` is interactive after page load.
 - [ ] Manual smoke: filter / publish / redaction add on `/admin` work end-to-end after page load.
 - [ ] Updated CSP comment in `next.config.ts` accurately describes which directives have inline allowances and why.

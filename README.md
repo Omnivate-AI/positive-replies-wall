@@ -2,7 +2,7 @@
 
 A public landing page that displays Omnivate's best positive cold-outbound replies — automatically captured from Smartlead, AI-classified for quality, and rendered as a wall of email reply cards with span-level redaction support.
 
-[Strategy brief](brief.md) · [Project report](report.md) · [QA tickets](qa-tickets/) · Live: https://positive-repies-wall.vercel.app · Admin: https://positive-repies-wall.vercel.app/admin
+[Strategy brief](brief.md) · [Project report](report.md) · [QA tickets](qa-tickets/) · Live: https://positive-replies-wall.vercel.app · Admin: https://positive-replies-wall.vercel.app/admin
 
 ---
 
@@ -154,7 +154,7 @@ npm run db:diff          # diff local vs remote schema
 The Vercel project is wired to auto-deploy on every push to `main`:
 1. Push to `Omnivate-AI/positive-replies-wall` main branch
 2. Vercel builds the Next.js app
-3. Live at https://positive-repies-wall.vercel.app
+3. Live at https://positive-replies-wall.vercel.app
 
 Manual deploy: `vercel --prod --yes --scope emmanuel-2239s-projects` (rare; only for hotfixes outside the git flow).
 

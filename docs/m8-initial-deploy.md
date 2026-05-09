@@ -4,7 +4,7 @@ A first public page on Vercel that reads live counts from Supabase and ticks the
 
 ## TL;DR
 
-- Live: https://positive-repies-wall.vercel.app/coming-soon
+- Live: https://positive-replies-wall.vercel.app/coming-soon
 - Server-rendered counts (no client-side caching). Classify a reply in Supabase, refresh the page, the number ticks up.
 - Vercel ↔ GitHub auto-deploy wired: every push to `Omnivate-AI/positive-replies-wall` `main` triggers a production build.
 - Repo flipped to public (Vercel Hobby plan can't link an org-owned private repo without Pro).
@@ -89,14 +89,14 @@ The M8 brief asked for two things — both satisfied:
 
 | Brief acceptance | Status | Where |
 |---|---|---|
-| 1. A coming-soon page on Vercel with a live count from Supabase | ✅ | https://positive-repies-wall.vercel.app/coming-soon |
+| 1. A coming-soon page on Vercel with a live count from Supabase | ✅ | https://positive-replies-wall.vercel.app/coming-soon |
 | 2. Vercel deploy hooked up to a GitHub branch so pushes redeploy automatically | ✅ | `vercel git connect` to `Omnivate-AI/positive-replies-wall` |
 
 The "subroute on omnivate.ai" pointer the brief mentions is a DNS / domain pass that Omar will do separately when he wants to share the URL externally. The Vercel-side custom-domain config takes a CNAME record and a re-deploy; nothing about the M8 build needs to change for it.
 
 ## Demo path (for the Loom)
 
-1. Open https://positive-repies-wall.vercel.app — three cards. Click "Preview the wall."
+1. Open https://positive-replies-wall.vercel.app — three cards. Click "Preview the wall."
 2. The /coming-soon page loads. Numbers tick up: `<HQ count> / <total ingested>`.
 3. In Supabase studio (or `npm run classify:local`), classify another reply at `prompt_version='v1.2'` with `is_high_quality=true`.
 4. Refresh /coming-soon. The HQ count is +1.

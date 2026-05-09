@@ -300,7 +300,7 @@ When ready to wire it up, the implementation is small:
 
 1. Provision a Slack bot in the Omnivate workspace (or reuse outbound's bot identity — same token, same workspace, just invite into the new channel).
 2. Add `SLACK_BOT_TOKEN` to Trigger.dev env vars.
-3. Add `WALL_BASE_URL=https://positive-repies-wall.vercel.app` to Trigger.dev env vars.
+3. Add `WALL_BASE_URL=https://positive-replies-wall.vercel.app` to Trigger.dev env vars.
 4. Create `trigger/lib/slack-notify.ts` — copy the shape from `outbound/trigger/lib/slack-notify.ts` (best-effort `chat.postMessage`, never throws).
 5. Edit `trigger/scheduled-ingest-and-classify.ts`:
    - On success: post one summary line — `📬 Daily run: 4 new positive replies, 2 high-quality. View admin: <WALL_BASE_URL>/admin`

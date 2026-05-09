@@ -91,8 +91,8 @@ Migration 005. Unused since migration 004; the e2e test already broke once on it
 
 | What | Where |
 |---|---|
-| Public wall | https://positive-repies-wall.vercel.app/ |
-| Admin | https://positive-repies-wall.vercel.app/admin |
+| Public wall | https://positive-replies-wall.vercel.app/ |
+| Admin | https://positive-replies-wall.vercel.app/admin |
 | GitHub repo | https://github.com/Omnivate-AI/positive-replies-wall |
 | Trigger.dev project | `proj_vdhufffmwghsuhddbqrd` (shared with outbound) |
 | Supabase project | `uivgowblojtyiobhgjlv` |

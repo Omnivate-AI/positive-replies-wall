@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   },
   description:
     "Verbatim positive replies to Omnivate's cold outbound, pulled live from our SDR inboxes. Names redacted, praise unedited.",
-  metadataBase: new URL("https://positive-repies-wall.vercel.app"),
+  metadataBase: new URL("https://positive-replies-wall.vercel.app"),
   openGraph: {
     title: "Positive Replies — Omnivate",
     description: "What real B2B prospects said when we cold-emailed them.",

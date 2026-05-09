@@ -98,7 +98,7 @@ At minimum:
 
 3. As an alternative if Upstash isn't already in the stack, use the simpler `@vercel/firewall` IP-rule UI to set `/api/admin/*` to 30 req/min from the dashboard — zero code change.
 
-4. Verify with `curl -I https://positive-repies-wall.vercel.app/` that the new headers ship.
+4. Verify with `curl -I https://positive-replies-wall.vercel.app/` that the new headers ship.
 
 **Acceptance criteria**
 - [ ] Response headers on `/` include `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options: DENY`.

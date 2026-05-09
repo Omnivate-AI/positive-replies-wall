@@ -31,7 +31,7 @@ This is almost certainly a holdover from M7-M8 when the wall was a private POC �
 
 **Evidence**
 - `app/layout.tsx:7-12` — current metadata block.
-- `README.md:1-12` — "A public landing page" + live URL `https://positive-repies-wall.vercel.app/`.
+- `README.md:1-12` — "A public landing page" + live URL `https://positive-replies-wall.vercel.app/`.
 - `brief.md` (project goal) — landing page meant for prospect-facing social proof.
 - `docs/m10-admin-and-public-wall.md:1-30` — the wall is the production surface; explicitly NOT a POC.
 - The /admin route, on the other hand, IS something we'd want noindexed — but root-layout metadata is the wrong granularity.
@@ -51,7 +51,7 @@ This is almost certainly a holdover from M7-M8 when the wall was a private POC �
        template: "%s — Omnivate",
      },
      description: "Verbatim positive replies to Omnivate's cold outbound, pulled live from our SDR inboxes. Names redacted, praise unedited.",
-     metadataBase: new URL("https://positive-repies-wall.vercel.app"),
+     metadataBase: new URL("https://positive-replies-wall.vercel.app"),
      openGraph: {
        title: "Positive Replies — Omnivate",
        description: "What real B2B prospects said when we cold-emailed them.",
@@ -74,7 +74,7 @@ This is almost certainly a holdover from M7-M8 when the wall was a private POC �
 3. (Optional, follow-up.) Add an `app/opengraph-image.tsx` so social shares of `/` generate a proper card.
 
 **Acceptance criteria**
-- [ ] `curl https://positive-repies-wall.vercel.app/` returns HTML whose `<head>` has no `<meta name="robots" content="noindex…">`.
+- [ ] `curl https://positive-replies-wall.vercel.app/` returns HTML whose `<head>` has no `<meta name="robots" content="noindex…">`.
 - [ ] The `<head>` for `/admin` and `/auth` still includes `<meta name="robots" content="noindex, nofollow">`.
 - [ ] The public-page description references the wall, not the M7 POC viewer.
 - [ ] OpenGraph tags are present so the wall unfurls cleanly when linked from Slack / Twitter / LinkedIn.

@@ -19,8 +19,8 @@ The three POCs all live in the production Next.js app at `app/m7/pocs`. Each ren
 | **Option C** — hybrid (rendered → image) | `app/api/og-reply/route.tsx` | An edge runtime that takes the same data Option B uses and rasterizes it to PNG via `@vercel/og` (Satori). Dynamic canvas height computed from body content so short replies don't sit on big white space. |
 
 Live URLs:
-- POC viewer: https://positive-repies-wall.vercel.app/m7/pocs
-- Classifier audit quiz: https://positive-repies-wall.vercel.app/m7/quiz
+- POC viewer: https://positive-replies-wall.vercel.app/m7/pocs
+- Classifier audit quiz: https://positive-replies-wall.vercel.app/m7/quiz
 
 ## Comparison
 
@@ -96,7 +96,7 @@ The quiz is a reusable audit tool — re-bake the fixture, retake the quiz, get 
 
 ## What's next (M8)
 
-M8 is "initial landing page deploy" per the brief — get an empty page on a Vercel URL with a live count from Supabase. We've already done the Vercel deploy (positive-repies-wall.vercel.app), so M8 is mostly:
+M8 is "initial landing page deploy" per the brief — get an empty page on a Vercel URL with a live count from Supabase. We've already done the Vercel deploy (positive-replies-wall.vercel.app), so M8 is mostly:
 
 1. Wire `/` (home page) to read `SELECT COUNT(*) FROM prw_classifications WHERE is_high_quality AND prompt_version = 'v1.2'` from Supabase
 2. Confirm a custom subroute on omnivate.ai (or accept the Vercel URL for now)
