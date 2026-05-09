@@ -8,12 +8,15 @@
  */
 
 import { useMemo, useState } from "react";
+import { AdminThreadTimeline } from "@/components/admin-thread-timeline";
 import { EmailReplyCard } from "@/components/email-reply-card";
 import { buildExcerpt, pickAnchorHighlight } from "@/lib/excerpt";
 import { inferMatchType, type RedactionEntry } from "@/lib/redactions";
 import { SDR_FIRST_NAMES } from "@/lib/sdr";
 import type { AdminThread } from "@/lib/supabase-public";
 import { CloseIcon } from "./icons";
+
+type PreviewView = "preview" | "thread";
 
 interface ThreadEditorProps {
   thread: AdminThread;
@@ -44,6 +47,9 @@ export function ThreadEditor({
   const [redactionInput, setRedactionInput] = useState("");
   const [highlightInput, setHighlightInput] = useState("");
   const [priorityInput, setPriorityInput] = useState(String(thread.display_priority));
+  // "preview" = what visitors will see on the wall.
+  // "thread"  = the full SDR↔lead conversation (M9-restructure payoff).
+  const [view, setView] = useState<PreviewView>("preview");
 
   // Build the truncated body the public wall would render so the admin
   // sees exactly what visitors will see. Anchor on the earliest highlight
@@ -120,26 +126,57 @@ export function ThreadEditor({
       <div className="grid flex-1 grid-cols-1 gap-6 overflow-y-auto p-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* Preview pane */}
         <div className="space-y-3">
-          <p className="text-xs font-medium uppercase tracking-wider text-fg-muted">
-            Public preview
-          </p>
-          <div data-preview-pane onMouseUp={onCaptureSelection}>
-            <EmailReplyCard
-              from_email={thread.from_email}
-              from_display_name={thread.from_display_name}
-              to_email={thread.to_email}
-              subject={thread.subject}
-              body={truncatedBody}
-              highlights={highlightTexts}
-              redactions={allRedactions}
-              received_at={thread.received_at}
-              density="compact"
-            />
+          {/* Tab toggle: public wall preview vs full conversation timeline */}
+          <div
+            role="tablist"
+            aria-label="Preview mode"
+            className="inline-flex items-center gap-0.5 rounded-button border border-border bg-bg-subtle p-0.5 text-xs"
+          >
+            {(
+              [
+                ["preview", "Public preview"],
+                ["thread", "Full thread"],
+              ] as [PreviewView, string][]
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                role="tab"
+                aria-selected={view === key}
+                onClick={() => setView(key)}
+                className={`rounded-[6px] px-3 py-1 font-medium transition-colors ${
+                  view === key
+                    ? "bg-surface text-fg shadow-button"
+                    : "text-fg-muted hover:text-fg"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
-          <p className="text-xs text-fg-subtle">
-            Tip: select text above and choose <strong>Highlight</strong> or{" "}
-            <strong>Redact</strong>.
-          </p>
+
+          {view === "preview" ? (
+            <>
+              <div data-preview-pane onMouseUp={onCaptureSelection}>
+                <EmailReplyCard
+                  from_email={thread.from_email}
+                  from_display_name={thread.from_display_name}
+                  to_email={thread.to_email}
+                  subject={thread.subject}
+                  body={truncatedBody}
+                  highlights={highlightTexts}
+                  redactions={allRedactions}
+                  received_at={thread.received_at}
+                  density="compact"
+                />
+              </div>
+              <p className="text-xs text-fg-subtle">
+                Tip: select text above and choose{" "}
+                <strong>Highlight</strong> or <strong>Redact</strong>.
+              </p>
+            </>
+          ) : (
+            <AdminThreadTimeline threadId={thread.thread_id} />
+          )}
         </div>
 
         {/* Actions pane */}
